@@ -1,0 +1,10 @@
+node_modules
+.next
+.cursor
+supabase/.temp
+public/images
+public/icon.svg
+package-lock.json
+AGENTS.md
+CLAUDE.md
+test-results

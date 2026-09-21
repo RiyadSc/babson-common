@@ -1,0 +1,132 @@
+import { DateTime } from 'luxon';
+import { CampusEvent, TIMEZONE } from './domain';
+export function sampleEvents(): CampusEvent[] {
+  const today = DateTime.now().setZone(TIMEZONE).startOf('day');
+  const items = [
+    [
+      'Sunset on the lawn',
+      'A blanket, a few snacks, and absolutely no agenda. Come catch the last of the sun and meet a few new faces.',
+      'Social',
+      'Maya Chen',
+      'Park Manor lawn',
+      0,
+      18,
+      12,
+      'sunset',
+      'student',
+    ],
+    [
+      'Coffee & a little conversation',
+      'Trade your usual coffee run for a new connection. Grab your favorite drink and pull up a chair.',
+      'Food & drink',
+      'Alex Rivera',
+      'Reynolds Campus Center',
+      0,
+      15,
+      8,
+      'coffee',
+      'student',
+    ],
+    [
+      'Pick-up, no pressure',
+      'A friendly game for every skill level. We’ll make teams when you arrive. First-timers very much encouraged.',
+      'Sports & outdoors',
+      'Jordan Lee',
+      'BRAC outdoor courts',
+      0,
+      17,
+      16,
+      'basketball',
+      'student',
+    ],
+    [
+      'Make something just because',
+      'Unplug for an hour of paint, paper, and a little creative chaos. All supplies included.',
+      'Arts & culture',
+      'Campus Arts Collective',
+      'Sorenson Center',
+      0,
+      19,
+      24,
+      'art',
+      'campus',
+    ],
+    [
+      'Small ideas, big possibilities',
+      'An open table for the idea you keep thinking about. Meet other curious students and help each other take the first step.',
+      'Learning',
+      'Entrepreneurship Club',
+      'Blank Center',
+      1,
+      16,
+      20,
+      'ideas',
+      'campus',
+    ],
+    [
+      'A slower start',
+      'An easy morning walk around campus. No pace to keep, no equipment needed. Just some fresh air before the day begins.',
+      'Wellness',
+      'Taylor Kim',
+      'Globe outside Olin Hall',
+      1,
+      9,
+      10,
+      'walk',
+      'student',
+    ],
+    [
+      'The bring-a-friend potluck',
+      'Bring something small to share, or simply bring yourself. A table with room for everyone.',
+      'Food & drink',
+      'Sam Patel',
+      'Trim lawn',
+      2,
+      18,
+      18,
+      'food',
+      'student',
+    ],
+    [
+      'Board games & good company',
+      'Cards, classics, and a few games you probably haven’t tried. We’ll teach every game.',
+      'Social',
+      'Casey Brooks',
+      'Reynolds lounge',
+      3,
+      19,
+      12,
+      'games',
+      'student',
+    ],
+  ];
+  return items.map((r, i) => ({
+    id: `sample-${i + 1}`,
+    title: r[0] as string,
+    description: r[1] as string,
+    category: r[2] as string,
+    organizer: r[3] as string,
+    host_id: `host-${i}`,
+    location: r[4] as string,
+    starts_at: today
+      .plus({ days: r[5] as number, hours: r[6] as number })
+      .toUTC()
+      .toISO()!,
+    ends_at: today
+      .plus({ days: r[5] as number, hours: (r[6] as number) + 2 })
+      .toUTC()
+      .toISO()!,
+    capacity: r[7] as number,
+    seats_left: i === 2 ? 0 : (r[7] as number) - 3,
+    cost: 0,
+    expectations:
+      'Come on your own or bring a friend. Everyone is welcome, and no experience is needed.',
+    cancellation_policy:
+      'Plans change. Please leave the activity as soon as you know so someone else can join.',
+    kind: r[9] as 'student' | 'campus',
+    status: 'published',
+    verified_at: today.plus({ hours: 9 }).toUTC().toISO()!,
+    source_name: r[9] === 'student' ? 'Student hosted' : 'Campus listing',
+    image: `/images/${r[8]}.svg`,
+  }));
+}

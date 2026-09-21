@@ -1,0 +1,47 @@
+{
+  "name": "babson-common",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:db": "tsx scripts/test-db.ts",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "@supabase/ssr": "latest",
+    "@supabase/supabase-js": "latest",
+    "fast-xml-parser": "latest",
+    "ical.js": "latest",
+    "lucide-react": "latest",
+    "luxon": "latest",
+    "next": "16.3.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "latest",
+    "@electric-sql/pglite": "latest",
+    "@playwright/test": "latest",
+    "@types/luxon": "latest",
+    "@types/node": "^22.0.0",
+    "@types/pg": "latest",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "16.3.4",
+    "pg": "latest",
+    "prettier": "^3.9.6",
+    "sharp": "latest",
+    "tsx": "latest",
+    "typescript": "^5.9.0",
+    "vitest": "latest"
+  },
+  "type": "module"
+}
