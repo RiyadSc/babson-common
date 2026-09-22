@@ -10,6 +10,9 @@ export type Draft = {
   ends_at: string | null;
   source_url: string;
   external_id: string | null;
+  category: string | null;
+  image: string | null;
+  register_url: string | null;
   confidence: number;
   fingerprint: string;
   content_hash: string;
@@ -29,6 +32,53 @@ export function fingerprint(x: { title: string; starts_at: string }) {
     )
     .digest('hex');
 }
+export function classifyEvent(text: string): string | null {
+  const t = text.toLowerCase();
+  const hit = (patterns: RegExp) => patterns.test(t);
+  if (
+    hit(
+      /\b(career fair|career center|internship|recruit|info session|information session|networking|resume|linkedin|employer|corporate|industry night|panel|case competition|trek|mba|consulting|banking|finance|investment|venture|entrepreneur|startup|interview prep|professional|business fraternity|pitch(?:ing)?)\b/,
+    )
+  )
+    return 'Professional';
+  if (
+    hit(
+      /\b(tournament|athletics|sports?|hockey|basketball|soccer|tennis|swim|golf|pickleball|frisbee|running|hike|outdoor|fitness|cup|match|marathon|climbing|kayak|volleyball|lacrosse|baseball|softball|field day)\b/,
+    )
+  )
+    return 'Sports & outdoors';
+  if (
+    hit(/\b(yoga|meditation|wellness|mental health|mindful|self-care|wellbeing|therapy|breathwork)\b/)
+  )
+    return 'Wellness';
+  if (
+    hit(
+      /\b(concert|music|band|dj|art|film|movie|screening|poetry|dance|gallery|theater|theatre|heritage|festival|exhibit|culture|open mic|showcase)\b/,
+    )
+  )
+    return 'Arts & culture';
+  if (
+    hit(
+      /\b(coffee|dinner|lunch|brunch|tea|boba|food|ice cream|breakfast|tasting|cafe|caf\u00e9|bake sale|meal|pot\s?luck|snack)\b/,
+    )
+  )
+    return 'Food & drink';
+  if (
+    hit(/\b(lecture|seminar|workshop|study|tutor|research|reading|book club|training|masterclass|talk|colloquium)\b/)
+  )
+    return 'Learning';
+  return null;
+}
+function normalizeUrl(candidate: unknown): string | null {
+  if (typeof candidate !== 'string') return null;
+  const trimmed = candidate.trim();
+  if (!/^https:\/\//i.test(trimmed) || trimmed.length > 500) return null;
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    return null;
+  }
+}
 export function normalizeInput(input: Record<string, unknown>, sourceUrl: string): Draft {
   const title = String(input.title || '').trim();
   if (title.length < 3 || title.length > 200) throw new Error('Missing or invalid title');
@@ -47,14 +97,24 @@ export function normalizeInput(input: Record<string, unknown>, sourceUrl: string
   const url = new URL(sourceUrl);
   if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Invalid source URL');
   const location = String(input.location || '').slice(0, 200);
+  const description = String(input.description || '').slice(0, 3000);
+  const category =
+    typeof input.category === 'string' && input.category
+      ? input.category
+      : classifyEvent(`${title} ${description}`);
+  const image = normalizeUrl(input.image);
+  const register_url = normalizeUrl(input.register_url);
   return {
     title,
-    description: String(input.description || '').slice(0, 3000),
+    description,
     location,
     starts_at,
     ends_at,
     source_url: url.toString(),
     external_id: input.external_id ? String(input.external_id) : null,
+    category,
+    image,
+    register_url,
     confidence: ends_at && location ? 0.95 : 0.5,
     fingerprint: fingerprint({ title, starts_at }),
     content_hash: createHash('sha256')
@@ -185,6 +245,11 @@ function extractJsonLdEvents(html: string, sourceUrl: string): Record<string, un
           : typeof record.url === 'string'
             ? String(record.url)
             : `${sourceUrl}#${String(record.name || record.startDate || '')}`;
+      const jsonLdImage = Array.isArray(record.image)
+        ? String(record.image[0] || '')
+        : typeof record.image === 'string'
+          ? record.image
+          : '';
       results.push({
         title: record.name,
         description: record.description,
@@ -192,6 +257,8 @@ function extractJsonLdEvents(html: string, sourceUrl: string): Record<string, un
         starts_at: record.startDate,
         ends_at: record.endDate,
         external_id: externalId,
+        image: jsonLdImage || null,
+        register_url: typeof record.url === 'string' ? record.url : null,
       });
     }
   }
@@ -243,6 +310,10 @@ function extractBabsonCards(html: string, sourceUrl: string): Record<string, unk
       ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
     }
     const link = (card.match(/href="(https?:\/\/[^"]+)"/i) || [])[1] || '';
+    const image =
+      (card.match(/<img[^>]+src="(https?:\/\/[^"]+)"/i) || [])[1] ||
+      (card.match(/<div class="image"[^>]*>\s*<img[^>]+src="([^"]+)"/i) || [])[1] ||
+      '';
     const place = title.match(/^([^:]{3,40},\s*[A-Za-z]{2}):\s+/)?.[1];
     const location = /^virtual/i.test(title) ? 'Online' : place || 'Babson College';
     results.push({
@@ -252,6 +323,8 @@ function extractBabsonCards(html: string, sourceUrl: string): Record<string, unk
       starts_at,
       ends_at,
       external_id: link || `${sourceUrl}#${title}`,
+      register_url: link || null,
+      image: image || null,
     });
   }
   return results;
@@ -288,6 +361,15 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
       ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
     }
     const location = String(row.event_location || row.event_address || row.groupName || 'Babson College');
+    const rsvp = typeof row.rsvpLinkCalendar === 'string' ? row.rsvpLinkCalendar : '';
+    const flyer = typeof row.eventFlyer === 'string' && row.eventFlyer ? row.eventFlyer : '';
+    const flyerUrl = flyer
+      ? flyer.startsWith('//')
+        ? `https:${flyer}`
+        : flyer.startsWith('/')
+          ? `https://belong.babson.edu${flyer}`
+          : flyer
+      : '';
     return [{
       title,
       description: decodeHtml(String(row.eventDescription || row.groupName || '')),
@@ -295,6 +377,8 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
       starts_at,
       ends_at,
       external_id: String(row.eventUID || row.id || `${sourceUrl}#${title}`),
+      register_url: rsvp || null,
+      image: flyerUrl || null,
     }];
   });
 }

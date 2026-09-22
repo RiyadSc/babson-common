@@ -67,6 +67,7 @@ const categoryImage: Record<string, string> = {
   'Arts & culture': 'art',
   Learning: 'ideas',
   Wellness: 'walk',
+  Professional: 'ideas',
 };
 export default function Hub({
   live,
@@ -646,6 +647,7 @@ export default function Hub({
                                       'Arts & culture': '✳',
                                       Learning: '↗',
                                       Wellness: '◒',
+                                      Professional: '▲',
                                     } as Record<string, string>
                                   )[e.category] || '✳'}
                                 </span>
@@ -659,6 +661,7 @@ export default function Hub({
                                         'Arts & culture': 'make space.',
                                         Learning: 'what if?',
                                         Wellness: 'slow down.',
+                                        Professional: 'go further.',
                                       } as Record<string, string>
                                     )[e.category]
                                   }
@@ -1035,10 +1038,10 @@ export default function Hub({
               <div className="detail-actions">
                 {event.status === 'cancelled' ? (
                   <p className="cancelled-note">This activity has been cancelled.</p>
-                ) : event.source_url && event.kind === 'campus' ? (
+                ) : (event.register_url || event.source_url) && event.kind === 'campus' ? (
                   <a
                     className="button primary"
-                    href={event.source_url}
+                    href={event.register_url || event.source_url}
                     target="_blank"
                     rel="noreferrer"
                   >

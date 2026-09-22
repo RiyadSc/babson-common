@@ -7,6 +7,7 @@ export const CATEGORIES = [
   'Arts & culture',
   'Learning',
   'Wellness',
+  'Professional',
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 export type CampusEvent = {
@@ -28,6 +29,7 @@ export type CampusEvent = {
   verified_at: string;
   source_name: string;
   source_url?: string;
+  register_url?: string;
   image?: string;
   attendance?: 'joined' | 'waitlisted';
   saved?: boolean;
