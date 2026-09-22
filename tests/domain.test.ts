@@ -151,6 +151,21 @@ describe('import revisions and timezones', () => {
     expect(result.drafts[0].location).toBe('Babson Park, MA');
     expect(result.drafts[0].starts_at).toBe('2026-10-03T22:00:00.000Z');
   });
+  it('captures the Register Now href from a real Babson card, not the find-out-more link', () => {
+    const html = `<ul><li class="event-item snippet event clearfix">
+      <div class="month">Sep</div><div class="day">25</div><div class="year">2026</div>
+      <p class="title">Babson Park, MA: The Babson Network Effect</p>
+      <span class="datelisting">4:00 PM</span> - <span class="datelisting">6:00 PM</span>
+      <a class="btn btn--med-green-BG" href="https://www.cvent.com/d/ydzllh/4W" target="_blank" title="Register">Register Now</a>
+      <div class="image">The Babson Network Effect brings alumni together.
+        <a class="find-out-more" href="https://www.cvent.com/d/ydzllh">Find out more</a>
+      </div>
+    </li></ul>`;
+    const result = parseFeed(html, 'html', 'https://www.babson.edu/about/events/');
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0].register_url).toBe('https://www.cvent.com/d/ydzllh/4W');
+    expect(result.drafts[0].external_id).toBe('https://www.cvent.com/d/ydzllh/4W');
+  });
   it('reads Belong CampusGroups calendar JSON', () => {
     const body = JSON.stringify({
       events: [{

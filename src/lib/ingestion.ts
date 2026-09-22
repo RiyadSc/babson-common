@@ -309,7 +309,18 @@ function extractBabsonCards(html: string, sourceUrl: string): Record<string, unk
     if (starts_at && ends_at && !times[1] && stamps.length < 2) {
       ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
     }
-    const link = (card.match(/href="(https?:\/\/[^"]+)"/i) || [])[1] || '';
+    // Babson cards render two links: the "Register Now" button (Cvent/registration form) and
+    // a "Find out more" link. Prefer the register button, then find-out-more, then any other
+    // external href in the card. Anything on babson.edu itself is only a last resort, because
+    // that usually points back at the calendar we're already scraping.
+    const hrefs = [...card.matchAll(/<a[^>]*\bhref="(https?:\/\/[^"#]+)"[^>]*>([\s\S]*?)<\/a>/gi)]
+      .map((m) => ({ href: m[1], html: m[2], attrs: m[0] }));
+    const registerLink =
+      hrefs.find((h) => /register/i.test(h.html) || /\bbtn\b/i.test(h.attrs))?.href ||
+      hrefs.find((h) => /find-out-more/i.test(h.attrs) || /find out more/i.test(h.html))?.href ||
+      hrefs.find((h) => !/babson\.edu/i.test(h.href))?.href ||
+      hrefs[0]?.href ||
+      '';
     const image =
       (card.match(/<img[^>]+src="(https?:\/\/[^"]+)"/i) || [])[1] ||
       (card.match(/<div class="image"[^>]*>\s*<img[^>]+src="([^"]+)"/i) || [])[1] ||
@@ -322,8 +333,8 @@ function extractBabsonCards(html: string, sourceUrl: string): Record<string, unk
       location,
       starts_at,
       ends_at,
-      external_id: link || `${sourceUrl}#${title}`,
-      register_url: link || null,
+      external_id: registerLink || `${sourceUrl}#${title}`,
+      register_url: registerLink || null,
       image: image || null,
     });
   }

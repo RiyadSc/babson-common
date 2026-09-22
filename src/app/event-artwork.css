@@ -1,0 +1,15 @@
+/* Activity illustrations are inline vectors; no image downloads. */
+.app-shell .event-card .event-image { height: auto; aspect-ratio: 16 / 9; }
+.activity-artwork { position: absolute; inset: 0; overflow: hidden; background: var(--paper); }
+.activity-artwork svg { display: block; width: 100%; height: 100%; }
+.app-shell .event-card { border-radius: 5px; }
+.app-shell .event-card .image-open { border: 0; }
+.app-shell .event-card .event-body { padding: 19px 18px 16px; }
+.app-shell .event-card .event-body h3 { font-size: 20px; line-height: 1.17; letter-spacing: -.035em; }
+.app-shell .event-card .type-badge { font-size: 9px; padding: 6px 8px; background: #fffffff2; }
+.app-shell .event-card .save-button { width: 34px; height: 34px; background: #fffffff2; }
+.app-shell .event-card .image-open:focus-visible { outline: 3px solid #006b45; outline-offset: -4px; }
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .event-card { transition: none; }
+  .app-shell .event-card:hover { transform: none; }
+}

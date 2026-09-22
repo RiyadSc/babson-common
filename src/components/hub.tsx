@@ -1,5 +1,4 @@
 'use client';
-/* eslint-disable @next/next/no-img-element */
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
@@ -49,6 +48,7 @@ import AuthScreen from './auth-screen';
 import Modal from './modal';
 import Moderation from './moderation';
 import HostFlow from './host-flow';
+import EventArtwork from './event-artwork';
 type Notice = { id: string; message: string; kind: string; created_at: string };
 type Initial = { events: CampusEvent[]; profile: Profile; notifications: Notice[] } | null;
 type Mode = 'Discover' | 'Plans' | 'Moderation';
@@ -634,43 +634,7 @@ export default function Hub({
                             aria-label={`View ${e.title}`}
                             onClick={() => showEvent(e)}
                           >
-                            {e.image && !e.image.startsWith('/images/') ? (
-                              <img src={e.image} alt="" />
-                            ) : (
-                              <div className="event-poster" aria-hidden="true">
-                                <span className="poster-symbol">
-                                  {(
-                                    {
-                                      Social: '✳',
-                                      'Food & drink': '↗',
-                                      'Sports & outdoors': '◎',
-                                      'Arts & culture': '✳',
-                                      Learning: '↗',
-                                      Wellness: '◒',
-                                      Professional: '▲',
-                                    } as Record<string, string>
-                                  )[e.category] || '✳'}
-                                </span>
-                                <span className="poster-word">
-                                  {
-                                    (
-                                      {
-                                        Social: 'together.',
-                                        'Food & drink': 'take a break.',
-                                        'Sports & outdoors': 'in motion.',
-                                        'Arts & culture': 'make space.',
-                                        Learning: 'what if?',
-                                        Wellness: 'slow down.',
-                                        Professional: 'go further.',
-                                      } as Record<string, string>
-                                    )[e.category]
-                                  }
-                                </span>
-                                <span className="poster-label">
-                                  COMMON / {e.category.toUpperCase()}
-                                </span>
-                              </div>
-                            )}
+                            <EventArtwork event={e} />
                           </button>
                           <span className="type-badge">
                             {e.kind === 'student' ? (

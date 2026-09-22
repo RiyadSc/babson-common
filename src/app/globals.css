@@ -1,4 +1,5 @@
 @import './swiss.css';
+@import './event-artwork.css';
 :root {
   --bg: #ffffff;
   --paper: #fff;
