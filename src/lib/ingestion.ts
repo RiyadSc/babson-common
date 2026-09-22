@@ -127,9 +127,14 @@ export function parseFeed(content: string, kind: ConnectorKind, sourceUrl: strin
       const json = JSON.parse(content);
       for (const item of Array.isArray(json) ? json : [json]) add(item);
     } else if (kind === 'html') {
-      // Extract schema.org Event objects from JSON-LD script tags. No HTML is executed;
-      // only <script type="application/ld+json"> payloads are parsed, then filtered by @type.
-      for (const item of extractJsonLdEvents(content, sourceUrl)) add(item);
+      // JSON-LD when a page publishes it, otherwise Babson's own event cards or the
+      // CampusGroups calendar JSON that Belong loads. No HTML or script is executed.
+      const items = [
+        ...extractJsonLdEvents(content, sourceUrl),
+        ...extractBabsonCards(content, sourceUrl),
+        ...extractCampusGroupsEvents(content, sourceUrl),
+      ];
+      for (const item of items) add(item);
     } else {
       const input = JSON.parse(content);
       add(input);
@@ -191,6 +196,107 @@ function extractJsonLdEvents(html: string, sourceUrl: string): Record<string, un
     }
   }
   return results;
+}
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  mdash: '—', ndash: '–', rsquo: "'", lsquo: "'", hellip: '…',
+};
+function decodeHtml(value: string) {
+  return value
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&([a-z]+);/gi, (match, name) => NAMED_ENTITIES[name.toLowerCase()] ?? match)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function easternInstant(year: number, month: number, day: number, label: string) {
+  const clock = DateTime.fromFormat(label.trim(), 'h:mm a', { zone: 'America/New_York' });
+  if (!clock.isValid) return null;
+  const instant = DateTime.fromObject(
+    { year, month, day, hour: clock.hour, minute: clock.minute },
+    { zone: 'America/New_York' },
+  );
+  return instant.isValid ? instant.toISO() : null;
+}
+function extractBabsonCards(html: string, sourceUrl: string): Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = [];
+  const cards = html.match(/<li class="event-item[\s\S]*?<\/li>/gi) || [];
+  for (const card of cards) {
+    const title = decodeHtml((card.match(/<p class="title">([\s\S]*?)<\/p>/i) || [])[1] || '');
+    if (!title) continue;
+    const stamps = [...card.matchAll(/<div class="month">(\w+)<\/div>\s*<div class="day">(\d+)<\/div>\s*<div class="year">(\d+)<\/div>/gi)];
+    const times = [...card.matchAll(/<span class="datelisting">([^<]+)<\/span>/gi)].map((m) => m[1]);
+    if (!stamps.length || !times.length) continue;
+    const startMonth = MONTHS[stamps[0][1].slice(0, 3).toLowerCase()];
+    const endStamp = stamps[1] || stamps[0];
+    const endMonth = MONTHS[endStamp[1].slice(0, 3).toLowerCase()];
+    if (!startMonth || !endMonth) continue;
+    const starts_at = easternInstant(Number(stamps[0][3]), startMonth, Number(stamps[0][2]), times[0]);
+    const endLabel = times[1] || times[0];
+    let ends_at = easternInstant(Number(endStamp[3]), endMonth, Number(endStamp[2]), endLabel);
+    if (starts_at && ends_at && !times[1] && stamps.length < 2) {
+      ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
+    }
+    const link = (card.match(/href="(https?:\/\/[^"]+)"/i) || [])[1] || '';
+    const place = title.match(/^([^:]{3,40},\s*[A-Za-z]{2}):\s+/)?.[1];
+    const location = /^virtual/i.test(title) ? 'Online' : place || 'Babson College';
+    results.push({
+      title,
+      description: decodeHtml((card.match(/<div class="image">([\s\S]*?)<a /i) || [])[1] || ''),
+      location,
+      starts_at,
+      ends_at,
+      external_id: link || `${sourceUrl}#${title}`,
+    });
+  }
+  return results;
+}
+function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<string, unknown>[] {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return [];
+  }
+  const events = (parsed as { events?: unknown }).events;
+  if (!Array.isArray(events)) return [];
+  return events.flatMap((event) => {
+    if (!event || typeof event !== 'object') return [];
+    const row = event as Record<string, unknown>;
+    const title = decodeHtml(String(row.title || ''));
+    const startDate = String(row.eventDateStr || '');
+    const endDate = String(row.eventEndDateStr || startDate);
+    const startLabel = String(row.startTime || '').replace(/\s+.*$/, '');
+    const endLabel = String(row.endTime || '').replace(/\s+.*$/, '');
+    if (!title || !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return [];
+    const clock = (day: string, label: string) => {
+      const parsedClock = DateTime.fromFormat(`${day} ${label}`, 'yyyy-MM-dd h:mma', {
+        zone: 'America/New_York',
+      });
+      return parsedClock.isValid ? parsedClock.toISO() : null;
+    };
+    const starts_at = clock(startDate, startLabel);
+    let ends_at = clock(endDate, endLabel || startLabel);
+    if (starts_at && ends_at && !endLabel) {
+      ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
+    }
+    const location = String(row.event_location || row.event_address || row.groupName || 'Babson College');
+    return [{
+      title,
+      description: decodeHtml(String(row.eventDescription || row.groupName || '')),
+      location: decodeHtml(location),
+      starts_at,
+      ends_at,
+      external_id: String(row.eventUID || row.id || `${sourceUrl}#${title}`),
+    }];
+  });
 }
 function summarizeAddress(address: unknown): string {
   if (typeof address === 'string') return address;

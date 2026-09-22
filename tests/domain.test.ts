@@ -138,6 +138,38 @@ describe('import revisions and timezones', () => {
     expect(result.drafts[0].external_id).toBe('https://www.babson.edu/e/1');
     expect(result.drafts[0].confidence).toBeGreaterThanOrEqual(0.9);
   });
+  it('reads Babson event cards that are not JSON-LD', () => {
+    const html = `<ul><li class="event-item snippet event clearfix">
+      <div class="month">Oct</div><div class="day">03</div><div class="year">2026</div>
+      <p class="title">Babson Park, MA: Sigma Phi Epsilon Anniversary</p>
+      <span class="datelisting">6:00 PM</span> - <span class="datelisting">9:00 PM</span>
+      <div class="image">A chapter anniversary on campus. <a href="https://www.babson.edu/e/sigep">more</a></div>
+    </li></ul>`;
+    const result = parseFeed(html, 'html', 'https://www.babson.edu/about/events/');
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0].title).toContain('Sigma Phi Epsilon');
+    expect(result.drafts[0].location).toBe('Babson Park, MA');
+    expect(result.drafts[0].starts_at).toBe('2026-10-03T22:00:00.000Z');
+  });
+  it('reads Belong CampusGroups calendar JSON', () => {
+    const body = JSON.stringify({
+      events: [{
+        title: 'House dinner',
+        eventDateStr: '2026-10-04',
+        eventEndDateStr: '2026-10-04',
+        startTime: '5:30pm',
+        endTime: '7:00pm EDT (GMT-4)',
+        event_location: 'Canfield Hall',
+        eventUID: 'house-1',
+        groupName: 'Canfield',
+      }],
+    });
+    const result = parseFeed(body, 'html', 'https://belong.babson.edu/calendar');
+    expect(result.drafts).toHaveLength(1);
+    expect(result.drafts[0].location).toBe('Canfield Hall');
+    expect(result.drafts[0].external_id).toBe('house-1');
+    expect(result.drafts[0].starts_at).toBe('2026-10-04T21:30:00.000Z');
+  });
   it('ignores non-Event JSON-LD nodes on the page', () => {
     const html = `<script type="application/ld+json">${JSON.stringify({
       '@type': 'Organization',

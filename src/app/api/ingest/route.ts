@@ -1,10 +1,26 @@
+import { DateTime } from 'luxon';
 import { adminClient, authorizedJob, storeImport } from '@/lib/jobs';
 import { ConnectorKind } from '@/lib/ingestion';
 // Only pre-approved hosts are fetched; redirects are forbidden.
 // Babson-owned subdomains match *.babson.edu. CampusGroups is the campus platform many
 // Babson clubs, houses, and Greek chapters publish their events on; enable specific
 // per-chapter feeds through the moderator source registration flow.
-const ALLOWED_EXTERNAL_HOSTS = new Set(['campusgroups.com']);
+const ALLOWED_EXTERNAL_HOSTS = new Set(['campusgroups.com', 'babsonathletics.com']);
+function belongFeed() {
+  const start = DateTime.now().setZone('America/New_York').toISODate();
+  const end = DateTime.now().setZone('America/New_York').plus({ days: 60 }).toISODate();
+  return new URL(
+    `https://belong.babson.edu/mobile_ws/v17/mobile_calendar.aspx?view=list&calendarView=list&range=0&limit=200&start_date=${start}&end_date=${end}`,
+  );
+}
+// Belong's public calendar page is a shell. The events are in its CampusGroups JSON API.
+// The placeholder CampusGroups login URL is the same calendar, so it uses that API too.
+function fetchUrl(sourceUrl: string) {
+  const url = new URL(sourceUrl);
+  if (url.hostname === 'belong.babson.edu') return belongFeed();
+  if (url.hostname === 'campusgroups.com') return belongFeed();
+  return url;
+}
 function isAllowedHost(hostname: string) {
   const h = hostname.toLowerCase();
   if (h === 'babson.edu' || h.endsWith('.babson.edu')) return true;
@@ -24,7 +40,7 @@ export async function GET(request: Request) {
   const results = [];
   for (const source of sources || []) {
     try {
-      const url = new URL(source.url);
+      const url = fetchUrl(source.url);
       if (
         url.protocol !== 'https:' ||
         url.port ||
