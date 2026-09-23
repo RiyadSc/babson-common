@@ -703,10 +703,10 @@ export default function Hub({
                             >
                               <Share2 size={17} />
                             </button>
-                            {e.source_url && e.kind === 'campus' ? (
+                            {(e.register_url || e.source_url) && e.kind === 'campus' ? (
                               <a
                                 className="button card-primary"
-                                href={e.source_url}
+                                href={e.register_url || e.source_url}
                                 target="_blank"
                                 rel="noreferrer"
                               >
