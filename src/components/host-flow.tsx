@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, Clock, MapPin, Sparkles } from 'lucide-react';
-import { CATEGORIES, TIMEZONE } from '@/lib/domain';
+import { CATEGORIES, Club, TIMEZONE } from '@/lib/domain';
 import { DateTime } from 'luxon';
 
 type Draft = {
@@ -35,12 +35,15 @@ const initialDraft: Draft = {
 export default function HostFlow({
   pending,
   publish,
+  clubs = [],
 }: {
   pending: boolean;
   publish: (data: Record<string, unknown>) => void;
+  clubs?: Club[];
 }) {
   const [step, setStep] = useState(1);
   const [draft, setDraft] = useState(initialDraft);
+  const [postAs, setPostAs] = useState('');
   const update = (name: keyof Draft, value: string) =>
     setDraft((current) => ({ ...current, [name]: value }));
 
@@ -62,6 +65,7 @@ export default function HostFlow({
     }
     publish({
       ...draft,
+      ...(postAs ? { organizer_id: postAs } : {}),
       starts_at: DateTime.fromISO(draft.starts_at, { zone: TIMEZONE }).toUTC().toISO() || '',
       ends_at: DateTime.fromISO(draft.ends_at, { zone: TIMEZONE }).toUTC().toISO() || '',
     });
@@ -208,6 +212,19 @@ export default function HostFlow({
               </span>
             </div>
           </div>
+          {clubs.length > 0 && (
+            <label>
+              Post as
+              <select value={postAs} onChange={(event) => setPostAs(event.target.value)}>
+                <option value="">Myself</option>
+                {clubs.map((club) => (
+                  <option key={club.id} value={club.id}>
+                    {club.name} (verified)
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <label>
             What should people know?
             <textarea
@@ -229,8 +246,10 @@ export default function HostFlow({
             />
           </label>
           <p className="fine-print">
-            Your name is visible to the verified Babson community. Anyone can join until the plan is
-            full.
+            {postAs
+              ? 'This plan appears under your club’s name and logo. You stay the host and can manage it.'
+              : 'Your name is visible to the verified Babson community.'}{' '}
+            Anyone can join until the plan is full.
           </p>
         </div>
       )}

@@ -1,6 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import { activitySchema, isBabsonEmail, rankEvents, calendar, inWindow } from '../src/lib/domain';
-import { normalizeInput, parseFeed, fingerprint } from '../src/lib/ingestion';
+import {
+  extractBelongClubs,
+  normalizeInput,
+  parseFeed,
+  fingerprint,
+} from '../src/lib/ingestion';
+describe('Belong club extraction', () => {
+  it('maps each event to its stable club id, decoding names and skipping rows without a club', () => {
+    const feed = JSON.stringify({
+      events: [
+        { eventUID: 'u1', club_id: 73101, groupName: 'Babson Ultimate Frisbee', clubAcronym: 'BUF' },
+        { eventUID: 'u2', club_id: '73065', groupName: 'Product, Building, &amp; Jammin' },
+        { eventUID: 'u3', club_id: null, groupName: 'Nobody' },
+      ],
+    });
+    expect(extractBelongClubs(feed)).toEqual([
+      { club_id: 73101, name: 'Babson Ultimate Frisbee', acronym: 'BUF', uid: 'u1' },
+      { club_id: 73065, name: 'Product, Building, & Jammin', acronym: null, uid: 'u2' },
+    ]);
+    expect(extractBelongClubs('<html></html>')).toEqual([]);
+  });
+});
 const event = {
   id: 'a',
   title: 'Coffee, connections',

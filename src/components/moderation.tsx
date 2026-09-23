@@ -1,6 +1,14 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
-import { loadModeration, moderate, reviewDraft, screenshotUrl } from '@/app/actions';
+import {
+  loadModeration,
+  moderate,
+  reviewClubRequest,
+  reviewDraft,
+  revokeClub,
+  screenshotUrl,
+} from '@/app/actions';
+import { OrgAvatar } from './club-panels';
 export default function Moderation() {
   const [data, setData] = useState<Awaited<ReturnType<typeof loadModeration>> | null>(null);
   const [error, setError] = useState('');
@@ -58,6 +66,78 @@ export default function Moderation() {
               </div>
             ))}
           </div>
+          <section className="moderation-card">
+            <h2>Club verification</h2>
+            <p>
+              Check the requester is really part of the club (for example on Belong’s officer
+              list) before approving. Approving makes them the club’s only manager.
+            </p>
+            {!data.clubRequests?.length && <p>No club requests waiting.</p>}
+            {data.clubRequests?.map((r) => (
+              <div className="moderation-row club-request-row" key={r.id}>
+                <div className="club-header">
+                  <OrgAvatar name={r.club_name} logo={r.logo_path} size="lg" />
+                  <div>
+                    <h3>{r.club_name}</h3>
+                    <p>
+                      {r.requester_name} · {r.requester_email} · {r.role_title}
+                    </p>
+                    <small>
+                      {r.organizer_id ? 'Existing club' : 'New organisation'}
+                      {r.current_owner ? ` · currently managed by ${r.current_owner}` : ''} ·
+                      Requested {new Date(r.created_at).toLocaleDateString()}
+                    </small>
+                  </div>
+                </div>
+                {r.note && <p>“{r.note}”</p>}
+                <label>
+                  Note to requester (optional)
+                  <input
+                    aria-label={`Club decision note ${r.id}`}
+                    value={notes[r.id] || ''}
+                    onChange={(e) => setNotes((n) => ({ ...n, [r.id]: e.target.value }))}
+                  />
+                </label>
+                <div>
+                  <button
+                    disabled={pending}
+                    className="button primary"
+                    onClick={() => run(() => reviewClubRequest(r.id, 'approve', notes[r.id] || ''))}
+                  >
+                    Approve & verify
+                  </button>
+                  <button
+                    disabled={pending}
+                    className="button secondary"
+                    onClick={() => run(() => reviewClubRequest(r.id, 'reject', notes[r.id] || ''))}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+            {data.verifiedClubs?.length > 0 && (
+              <>
+                <h3>Verified organisations</h3>
+                {data.verifiedClubs.map((c) => (
+                  <div className="moderation-row" key={c.id}>
+                    <strong>{c.name}</strong> · managed by {c.profiles?.name || 'unknown'} · since{' '}
+                    {new Date(c.verified_at).toLocaleDateString()}
+                    <button
+                      disabled={pending}
+                      className="text-button"
+                      onClick={() => {
+                        if (confirm(`Remove verification and manager from ${c.name}?`))
+                          run(() => revokeClub(c.id));
+                      }}
+                    >
+                      Remove verification
+                    </button>
+                  </div>
+                ))}
+              </>
+            )}
+          </section>
           <section className="moderation-card">
             <h2>Open reports</h2>
             {!data.reports?.length && <p>No open reports.</p>}

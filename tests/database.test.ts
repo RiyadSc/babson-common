@@ -216,6 +216,147 @@ it('blocks visibility and removes existing attendance in both directions', async
     ).rows[0].status,
   ).toBe('joined');
 });
+it('verifies club managers, links Belong clubs, and shows organisers who is going', async () => {
+  await db.query("update profiles set role='moderator' where id=$1", [ids[3]]);
+  const source = (
+    await db.query<{ id: string }>(
+      "insert into sources(name,url,kind) values ('Belong test','https://belong.babson.edu/calendar','html') returning id",
+    )
+  ).rows[0].id;
+  const campus = (
+    await db.query<{ id: string }>(
+      `insert into events(title,description,category,source_id,location,kind,expectations,cancellation_policy)
+       values ('Frisbee pickup game','Throw a disc with the club on the lawn.','Sports & outdoors',$1,'Coleman lawn','campus','All welcome','Check source')
+       returning id`,
+      [source],
+    )
+  ).rows[0].id;
+  await db.query(
+    "insert into occurrences(event_id,starts_at,ends_at,capacity) values ($1,'2099-07-01T18:00:00Z','2099-07-01T20:00:00Z',2)",
+    [campus],
+  );
+  await db.query(
+    "insert into import_drafts(source_id,external_id,fingerprint,payload,raw,confidence,status,published_event_id) values ($1,'belong-uid-1','fp','{}','{}',.95,'published',$2)",
+    [source, campus],
+  );
+  await expect(
+    asUser(ids[1], `select sync_belong_clubs('[]'::jsonb, array['${source}']::uuid[])`),
+  ).rejects.toThrow();
+  await db.query(
+    `select sync_belong_clubs('[{"club_id":73101,"name":"Babson Ultimate Frisbee","acronym":"BUF","uid":"belong-uid-1"}]'::jsonb, array['${source}']::uuid[])`,
+  );
+  const feed = await asUser(
+    ids[1],
+    `select organizer, organizer_is_club, organizer_verified, organizer_id from event_feed where id='${campus}'`,
+  );
+  const row = feed.rows[0] as { organizer: string; organizer_verified: boolean; organizer_id: string };
+  expect(row.organizer).toBe('Babson Ultimate Frisbee');
+  expect(row.organizer_verified).toBe(false);
+
+  for (const id of [ids[1], ids[2], ids[3]])
+    expect((await asUser(id, `select join_activity('${campus}') as s`)).rows[0]).toEqual({
+      s: 'joined',
+    });
+  await expect(asUser(ids[2], `select * from event_attendees('${campus}')`)).rejects.toThrow();
+
+  const earlier = (
+    await asUser(
+      ids[1],
+      `select request_club('${row.organizer_id}', null, 'President', null, null) as id`,
+    )
+  ).rows[0] as { id: string };
+  const request = (
+    await asUser(
+      ids[2],
+      `select request_club('${row.organizer_id}', null, 'VP Communications', null, null) as id`,
+    )
+  ).rows[0] as { id: string };
+  await expect(
+    asUser(ids[2], `select review_club_request('${request.id}','approve')`),
+  ).rejects.toThrow();
+  await asUser(ids[3], `select review_club_request('${request.id}','approve')`);
+  await expect(
+    asUser(ids[3], `select review_club_request('${earlier.id}','approve')`),
+  ).rejects.toThrow(/verified manager/);
+  await expect(
+    asUser(ids[1], `select request_club('${row.organizer_id}', null, 'President', null, null)`),
+  ).rejects.toThrow(/verified manager/);
+  expect(
+    (await asUser(ids[2], `select * from event_attendees('${campus}')`)).rows,
+  ).toHaveLength(3);
+  await asUser(ids[2], `select post_announcement('${campus}','Bring water and cleats!')`);
+
+  const hangout = {
+    title: 'Club throwing clinic',
+    description: 'Learn backhands and forehands with the team.',
+    category: 'Sports & outdoors',
+    location: 'Coleman lawn',
+    starts_at: '2099-07-02T18:00:00Z',
+    ends_at: '2099-07-02T19:00:00Z',
+    capacity: 20,
+    cost: 0,
+    expectations: 'All levels welcome',
+    cancellation_policy: 'Leave if plans change',
+  };
+  await expect(
+    asUser(
+      ids[1],
+      `select create_activity('${JSON.stringify({ ...hangout, organizer_id: row.organizer_id })}')`,
+    ),
+  ).rejects.toThrow();
+  const posted = (
+    await asUser(
+      ids[2],
+      `select create_activity('${JSON.stringify({ ...hangout, organizer_id: row.organizer_id })}') as id`,
+    )
+  ).rows[0] as { id: string };
+  const asClub = (
+    await asUser(
+      ids[1],
+      `select organizer, organizer_verified from event_feed where id='${posted.id}'`,
+    )
+  ).rows[0];
+  expect(asClub).toEqual({ organizer: 'Babson Ultimate Frisbee', organizer_verified: true });
+
+  const namedRequest = (
+    await asUser(
+      ids[2],
+      `select request_club(null, 'Named Before Import', 'VP Communications', null, null) as id`,
+    )
+  ).rows[0] as { id: string };
+  const namedOrg = (
+    await asUser(ids[3], `select review_club_request('${namedRequest.id}','approve') as org`)
+  ).rows[0] as { org: string };
+  const campus2 = (
+    await db.query<{ id: string }>(
+      `insert into events(title,description,category,source_id,location,kind,expectations,cancellation_policy)
+       values ('Named club mixer','Meet the club before the import links it.','Social',$1,'Reynolds','campus','All welcome','Check source')
+       returning id`,
+      [source],
+    )
+  ).rows[0].id;
+  await db.query(
+    "insert into occurrences(event_id,starts_at,ends_at,capacity) values ($1,'2099-07-03T18:00:00Z','2099-07-03T20:00:00Z',20)",
+    [campus2],
+  );
+  await db.query(
+    "insert into import_drafts(source_id,external_id,fingerprint,payload,raw,confidence,status,published_event_id) values ($1,'belong-uid-2','fp-2','{}','{}',.95,'published',$2)",
+    [source, campus2],
+  );
+  await db.query(
+    `select sync_belong_clubs('[{"club_id":88001,"name":"Named Before Import","acronym":"NBI","uid":"belong-uid-2"}]'::jsonb, array['${source}']::uuid[])`,
+  );
+  const linked = (
+    await asUser(
+      ids[1],
+      `select organizer_id, organizer_verified from event_feed where id='${campus2}'`,
+    )
+  ).rows[0] as { organizer_id: string; organizer_verified: boolean };
+  expect(linked).toEqual({ organizer_id: namedOrg.org, organizer_verified: true });
+
+  await asUser(ids[3], `select revoke_club('${row.organizer_id}')`);
+  await expect(asUser(ids[2], `select * from event_attendees('${campus}')`)).rejects.toThrow();
+});
 it('does not deliver stale reminders after cancellation', async () => {
   await db.query("update events set status='cancelled' where id=$1", [eid]);
   const claimed = await db.query<{ notification_id: string }>('select * from claim_deliveries()');

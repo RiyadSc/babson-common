@@ -1,9 +1,15 @@
 'use server';
 import { z } from 'zod';
-import { activitySchema, isBabsonEmail } from '@/lib/domain';
+import {
+  activitySchema,
+  Club,
+  ClubRequest,
+  clubProfileSchema,
+  isBabsonEmail,
+} from '@/lib/domain';
 import { serverClient, studentClient } from '@/lib/supabase/server';
 import { appUrl } from '@/lib/env';
-import { prepareScreenshot } from '@/lib/attachments';
+import { prepareLogo, prepareScreenshot } from '@/lib/attachments';
 import { normalizeInput } from '@/lib/ingestion';
 export async function signIn(email: string, mode: 'login' | 'signup' = 'login', returnTo = '/app') {
   if (!isBabsonEmail(email)) return { error: 'Use your @babson.edu email address.' };
@@ -30,12 +36,32 @@ export async function loadHub() {
     client.from('attendance').select('event_id,status').eq('user_id', user.id),
     client.from('saves').select('event_id').eq('user_id', user.id),
     client.from('notifications').select('*').order('created_at', { ascending: false }).limit(50),
+    client
+      .from('organizers')
+      .select('id,name,acronym,bio,logo_path,instagram,website,verified_at,owner_id')
+      .eq('kind', 'club')
+      .order('name')
+      .limit(1000),
+    client
+      .from('club_requests')
+      .select('id,club_name,status,created_at')
+      .eq('requester_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(10),
   ]);
-  const labels = ['event_feed', 'profiles', 'attendance', 'saves', 'notifications'];
+  const labels = [
+    'event_feed',
+    'profiles',
+    'attendance',
+    'saves',
+    'notifications',
+    'organizers',
+    'club_requests',
+  ];
   results.forEach((r, i) => {
     if (r.error) throw new Error(`${labels[i]}: ${r.error.message}`);
   });
-  const [events, profile, attendance, saves, notifications] = results;
+  const [events, profile, attendance, saves, notifications, clubs, clubRequests] = results;
   return {
     events: events.data!.map((e) => ({
       ...e,
@@ -44,7 +70,97 @@ export async function loadHub() {
     })),
     profile: profile.data!,
     notifications: notifications.data!,
+    clubs: clubs.data! as Club[],
+    clubRequests: clubRequests.data! as ClubRequest[],
   };
+}
+async function uploadLogo(
+  client: Awaited<ReturnType<typeof studentClient>>['client'],
+  userId: string,
+  file: FormDataEntryValue | null,
+) {
+  if (!(file instanceof File) || !file.size) return null;
+  const bytes = await prepareLogo(file);
+  const path = `${userId}/${crypto.randomUUID()}.webp`;
+  const upload = await client.storage
+    .from('club-logos')
+    .upload(path, bytes, { contentType: 'image/webp', upsert: false });
+  if (upload.error) throw new Error(upload.error.message);
+  return path;
+}
+function actionError(error: unknown) {
+  return error instanceof z.ZodError
+    ? error.issues.map((i) => i.message).join('. ')
+    : error instanceof Error
+      ? error.message
+      : 'Something went wrong';
+}
+export async function requestClub(form: FormData) {
+  try {
+    const { client, user } = await studentClient();
+    const input = z
+      .object({
+        organizer_id: z.union([z.uuid(), z.literal('')]),
+        club_name: z.string().trim().max(100),
+        role_title: z.string().trim().min(2, 'Tell us your role in the club').max(80),
+        note: z.string().trim().max(500),
+      })
+      .parse({
+        organizer_id: form.get('organizer_id') || '',
+        club_name: form.get('club_name') || '',
+        role_title: form.get('role_title') || '',
+        note: form.get('note') || '',
+      });
+    if (!input.organizer_id && input.club_name.length < 2)
+      throw new Error('Choose your club or type its name');
+    const logo = await uploadLogo(client, user.id, form.get('logo'));
+    const { error } = await client.rpc('request_club', {
+      p_organizer: input.organizer_id || null,
+      p_name: input.club_name,
+      p_role: input.role_title,
+      p_note: input.note,
+      p_logo: logo,
+    });
+    if (error) {
+      if (logo) await client.storage.from('club-logos').remove([logo]);
+      throw new Error(error.message);
+    }
+    return { ok: true };
+  } catch (error) {
+    return { error: actionError(error) };
+  }
+}
+export async function updateClub(form: FormData) {
+  try {
+    const { client, user } = await studentClient();
+    const id = z.uuid().parse(form.get('organizer_id'));
+    const profile = clubProfileSchema.parse({
+      bio: form.get('bio') || '',
+      instagram: form.get('instagram') || '',
+      website: form.get('website') || '',
+    });
+    const logo = await uploadLogo(client, user.id, form.get('logo'));
+    const { error } = await client.rpc('update_club', {
+      org: id,
+      p_bio: profile.bio,
+      p_instagram: profile.instagram,
+      p_website: profile.website,
+      p_logo: logo,
+    });
+    if (error) {
+      if (logo) await client.storage.from('club-logos').remove([logo]);
+      throw new Error(error.message);
+    }
+    return { ok: true };
+  } catch (error) {
+    return { error: actionError(error) };
+  }
+}
+export async function eventAttendees(id: string) {
+  const { client } = await studentClient();
+  const { data, error } = await client.rpc('event_attendees', { eid: z.uuid().parse(id) });
+  if (error) throw new Error(error.message);
+  return data as { name: string; status: string; joined_at: string }[];
 }
 export async function mutate(action: string, input: unknown) {
   try {
@@ -147,6 +263,13 @@ export async function loadModeration() {
     client.from('sources').select('*'),
     client.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50),
     client.rpc('pilot_metrics'),
+    client.rpc('pending_club_requests'),
+    client
+      .from('organizers')
+      .select('id,name,verified_at,owner_id,profiles:owner_id(name)')
+      .eq('kind', 'club')
+      .not('verified_at', 'is', null)
+      .order('name'),
   ]);
   for (const r of results) if (r.error) throw new Error(r.error.message);
   return {
@@ -155,7 +278,39 @@ export async function loadModeration() {
     sources: results[2].data,
     audit: results[3].data,
     metrics: results[4].data,
+    clubRequests: results[5].data as {
+      id: string;
+      organizer_id: string | null;
+      club_name: string;
+      role_title: string;
+      note: string | null;
+      logo_path: string | null;
+      requester_name: string;
+      requester_email: string;
+      created_at: string;
+      current_owner: string | null;
+    }[],
+    verifiedClubs: results[6].data as unknown as {
+      id: string;
+      name: string;
+      verified_at: string;
+      profiles: { name: string } | null;
+    }[],
   };
+}
+export async function reviewClubRequest(id: string, decision: 'approve' | 'reject', note: string) {
+  const { client } = await studentClient();
+  const { error } = await client.rpc('review_club_request', {
+    rid: z.uuid().parse(id),
+    decision,
+    p_note: note.trim().slice(0, 500) || null,
+  });
+  if (error) throw new Error(error.message);
+}
+export async function revokeClub(id: string) {
+  const { client } = await studentClient();
+  const { error } = await client.rpc('revoke_club', { org: z.uuid().parse(id) });
+  if (error) throw new Error(error.message);
 }
 export async function moderate(id: string, resolution: string, note: string) {
   const { client } = await studentClient();

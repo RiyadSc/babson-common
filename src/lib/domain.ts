@@ -16,6 +16,11 @@ export type CampusEvent = {
   description: string;
   category: string;
   organizer: string;
+  organizer_id?: string | null;
+  organizer_is_club?: boolean | null;
+  organizer_verified?: boolean | null;
+  organizer_logo?: string | null;
+  going_count?: number | null;
   host_id: string | null;
   location: string;
   starts_at: string;
@@ -42,6 +47,44 @@ export type Profile = {
   reminders: boolean;
   role: 'student' | 'moderator';
 };
+export type Club = {
+  id: string;
+  name: string;
+  acronym: string | null;
+  bio: string | null;
+  logo_path: string | null;
+  instagram: string | null;
+  website: string | null;
+  verified_at: string | null;
+  owner_id: string | null;
+};
+export type ClubRequest = {
+  id: string;
+  club_name: string;
+  status: 'pending' | 'approved' | 'rejected';
+  created_at: string;
+};
+export function clubLogoUrl(path: string | null | undefined) {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!path || !base) return null;
+  return `${base}/storage/v1/object/public/club-logos/${path}`;
+}
+export const clubProfileSchema = z.object({
+  bio: z.string().trim().max(600).optional().default(''),
+  instagram: z
+    .string()
+    .trim()
+    .transform((v) => v.replace(/^@/, '').replace(/^https?:\/\/(www\.)?instagram\.com\//i, '').replace(/\/$/, ''))
+    .pipe(z.string().regex(/^[A-Za-z0-9._]{0,30}$/, 'Enter an Instagram handle like babsonfrisbee'))
+    .optional()
+    .default(''),
+  website: z
+    .string()
+    .trim()
+    .refine((v) => v === '' || (/^https:\/\//i.test(v) && v.length <= 300), 'Website must start with https://')
+    .optional()
+    .default(''),
+});
 export const isBabsonEmail = (email: string) => /^[^\s@]+@babson\.edu$/i.test(email.trim());
 export const activitySchema = z
   .object({
@@ -55,6 +98,7 @@ export const activitySchema = z
     cost: z.coerce.number().min(0).max(1000),
     expectations: z.string().trim().min(5).max(1000),
     cancellation_policy: z.string().trim().min(5).max(500),
+    organizer_id: z.uuid().optional(),
   })
   .refine((x) => new Date(x.starts_at) > new Date(), {
     message: 'Choose a future start time',

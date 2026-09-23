@@ -30,6 +30,7 @@ import {
   Share2,
   CalendarPlus,
   ListChecks,
+  BadgeCheck,
 } from 'lucide-react';
 import {
   activitySchema,
@@ -38,20 +39,37 @@ import {
   campusTime,
   CATEGORIES,
   CampusEvent,
+  Club,
+  ClubRequest,
   inWindow,
   Profile,
   rankEvents,
   TIMEZONE,
 } from '@/lib/domain';
-import { eventAnnouncements, loadHub, mutate, signOut } from '@/app/actions';
+import { eventAnnouncements, eventAttendees, loadHub, mutate, signOut } from '@/app/actions';
 import AuthScreen from './auth-screen';
 import Modal from './modal';
 import Moderation from './moderation';
 import HostFlow from './host-flow';
 import EventArtwork from './event-artwork';
 import CalendarView from './calendar-view';
+import {
+  ClubEditForm,
+  ClubProfile,
+  ClubRequestForm,
+  OrgAvatar,
+  OrgFilter,
+  VerifiedMark,
+} from './club-panels';
 type Notice = { id: string; message: string; kind: string; created_at: string };
-type Initial = { events: CampusEvent[]; profile: Profile; notifications: Notice[] } | null;
+type Initial = {
+  events: CampusEvent[];
+  profile: Profile;
+  notifications: Notice[];
+  clubs?: Club[];
+  clubRequests?: ClubRequest[];
+} | null;
+type Attendee = { name: string; status: string; joined_at: string };
 type Mode = 'Discover' | 'Plans' | 'Moderation';
 type DiscoverView = 'grid' | 'calendar';
 type PlanTab = 'Going' | 'Saved' | 'Hosting';
@@ -106,6 +124,11 @@ export default function Hub({
   const [pending, startTransition] = useTransition();
   const [ready, setReady] = useState(false);
   const [announcements, setAnnouncements] = useState<{ id: string; body: string }[]>([]);
+  const [clubs, setClubs] = useState<Club[]>(initial?.clubs || []);
+  const [clubRequests, setClubRequests] = useState<ClubRequest[]>(initial?.clubRequests || []);
+  const [orgFilter, setOrgFilter] = useState<string[]>([]);
+  const [clubView, setClubView] = useState<{ id: string | null; name: string } | null>(null);
+  const [attendees, setAttendees] = useState<Attendee[] | null>(null);
   const openedFromHub = useRef(false);
   /* eslint-disable react-hooks/set-state-in-effect -- Hydrate browser-local preview storage after SSR. */
   useEffect(() => {
@@ -165,7 +188,23 @@ export default function Hub({
     setEvents(data.events as CampusEvent[]);
     setProfile(data.profile as Profile);
     setNotices(data.notifications as Notice[]);
+    setClubs(data.clubs);
+    setClubRequests(data.clubRequests);
   };
+  const managedClubs = clubs.filter((c) => c.owner_id === profile.id && c.verified_at);
+  const managesEvent = (e: CampusEvent) =>
+    e.host_id === profile.id || managedClubs.some((c) => c.id === e.organizer_id);
+  const byOrg = (e: CampusEvent) => orgFilter.length === 0 || orgFilter.includes(e.organizer);
+  const openClub = (e: Pick<CampusEvent, 'organizer' | 'organizer_id' | 'organizer_is_club'>) => {
+    setClubView({ id: e.organizer_is_club ? e.organizer_id || null : null, name: e.organizer });
+    if (modal === 'detail') {
+      openedFromHub.current = false;
+      setSelected(null);
+      globalThis.history.replaceState(null, '', live ? '/app' : '/preview');
+    }
+    open('club');
+  };
+  const viewedClub = clubView?.id ? clubs.find((c) => c.id === clubView.id) : undefined;
   const open = (name: string) => {
     setFormError('');
     setModal(name);
@@ -199,6 +238,7 @@ export default function Hub({
       live ? `/events/${e.id}` : `/preview?event=${encodeURIComponent(e.id)}`,
     );
     setAnnouncements([]);
+    setAttendees(null);
     if (live) {
       void mutate('view', { id: e.id });
       void eventAnnouncements(e.id)
@@ -267,6 +307,14 @@ export default function Hub({
             es.map((e) => {
               if (e.id !== data.id) return e;
               if (action === 'save') return { ...e, saved: Boolean(data.saved) };
+              if (action === 'join' && e.kind === 'campus')
+                return { ...e, attendance: 'joined', going_count: (e.going_count || 0) + 1 };
+              if (action === 'leave' && e.kind === 'campus')
+                return {
+                  ...e,
+                  attendance: undefined,
+                  going_count: Math.max(0, (e.going_count || 0) - 1),
+                };
               if (action === 'join')
                 return {
                   ...e,
@@ -306,13 +354,14 @@ export default function Hub({
       if (e.status === 'hidden') return false;
       if (mode === 'Plans' && planTab === 'Going') return Boolean(e.attendance);
       if (mode === 'Plans' && planTab === 'Saved') return Boolean(e.saved);
-      if (mode === 'Plans' && planTab === 'Hosting') return e.host_id === profile.id;
+      if (mode === 'Plans' && planTab === 'Hosting') return managesEvent(e);
       return (
         e.status === 'published' &&
         inWindow(e, window) &&
         (category === 'All plans' || e.category === category) &&
         (!free || e.cost === 0) &&
         (kind === 'all' || e.kind === kind) &&
+        byOrg(e) &&
         `${e.title} ${e.description} ${e.location} ${e.organizer}`
           .toLowerCase()
           .includes(search.toLowerCase())
@@ -505,8 +554,9 @@ export default function Hub({
                     </button>
                   </div>
                 </section>
+                <OrgFilter events={events} selected={orgFilter} onChange={setOrgFilter} />
                 {discoverView === 'calendar' ? (
-                  <CalendarView events={events} onShow={showEvent} />
+                  <CalendarView events={events.filter(byOrg)} onShow={showEvent} />
                 ) : (
                 <section className="discovery-section" aria-label="Discover plans">
                   <div className="section-heading">
@@ -579,6 +629,7 @@ export default function Hub({
                           setKind('all');
                           setCategory('All plans');
                           setSearch('');
+                          setOrgFilter([]);
                         }}
                       >
                         Reset filters
@@ -714,13 +765,17 @@ export default function Hub({
                           <div className="event-availability">
                             {e.status === 'cancelled'
                               ? 'Cancelled'
-                              : e.seats_left === 0
-                                ? 'Waitlist open'
-                                : `${e.seats_left ?? e.capacity} spots left`}
+                              : e.kind === 'campus'
+                                ? `${e.going_count || 0} going on Common`
+                                : e.seats_left === 0
+                                  ? 'Waitlist open'
+                                  : `${e.seats_left ?? e.capacity} spots left`}
                             <span>·</span>
-                            {e.kind === 'student'
-                              ? 'Verified student host'
-                              : 'Verified campus listing'}
+                            {e.organizer_verified
+                              ? 'Verified organisation'
+                              : e.kind === 'student'
+                                ? 'Verified student host'
+                                : 'Verified campus listing'}
                           </div>
                           <div className="card-actions">
                             <button
@@ -730,7 +785,31 @@ export default function Hub({
                             >
                               <Share2 size={17} />
                             </button>
-                            {(e.register_url || e.source_url) && e.kind === 'campus' ? (
+                            {e.kind === 'campus' && e.status === 'published' && (
+                              <button
+                                className={`card-going ${e.attendance ? 'active' : ''}`}
+                                aria-pressed={Boolean(e.attendance)}
+                                aria-label={`${e.attendance ? 'Not going to' : 'Going to'} ${e.title}`}
+                                disabled={pending}
+                                onClick={() =>
+                                  doAction(
+                                    e.attendance ? 'leave' : 'join',
+                                    { id: e.id },
+                                    e.attendance
+                                      ? 'Removed from your plans.'
+                                      : 'Marked as going. It’s in My plans — remember to register on the event site too.',
+                                  )
+                                }
+                              >
+                                <Check size={15} />
+                                {e.attendance ? 'Going' : 'Going?'}
+                              </button>
+                            )}
+                            {managesEvent(e) && mode === 'Plans' && planTab === 'Hosting' ? (
+                              <button className="button card-primary" onClick={() => showEvent(e)}>
+                                Manage <ArrowRight size={15} />
+                              </button>
+                            ) : (e.register_url || e.source_url) && e.kind === 'campus' ? (
                               <a
                                 className="button card-primary"
                                 href={e.register_url || e.source_url}
@@ -765,20 +844,23 @@ export default function Hub({
                             )}
                           </div>
                           <div className="card-bottom">
-                            <span className="host-avatar">
-                              {e.organizer
-                                .split(' ')
-                                .map((x) => x[0])
-                                .slice(0, 2)
-                                .join('')}
-                            </span>
-                            <span>{e.organizer}</span>
+                            <button
+                              className="card-organizer"
+                              onClick={() => openClub(e)}
+                              aria-label={`About ${e.organizer}`}
+                            >
+                              <OrgAvatar name={e.organizer} logo={e.organizer_logo} />
+                              <span className="card-organizer-name">{e.organizer}</span>
+                              {e.organizer_verified && <VerifiedMark label={false} />}
+                            </button>
                             <span className="capacity-label">
                               {e.status === 'cancelled'
                                 ? 'Cancelled'
-                                : e.seats_left === 0
-                                  ? 'Waitlist open'
-                                  : `${e.seats_left ?? e.capacity} spots`}
+                                : e.kind === 'campus'
+                                  ? `${e.going_count || 0} going`
+                                  : e.seats_left === 0
+                                    ? 'Waitlist open'
+                                    : `${e.seats_left ?? e.capacity} spots`}
                               <ArrowUpRight size={13} />
                             </span>
                           </div>
@@ -804,6 +886,7 @@ export default function Hub({
                           setSearch('');
                           setFree(false);
                           setKind('all');
+                          setOrgFilter([]);
                         }}
                       >
                         Explore this week <ArrowRight size={16} />
@@ -951,6 +1034,9 @@ export default function Hub({
                   report: 'Help keep Common welcoming.',
                   announce: 'Keep everyone in the loop.',
                   cancel: 'Plans change. That’s okay.',
+                  club: clubView?.name || 'Organisation',
+                  'club-request': 'Represent your organisation.',
+                  'club-edit': 'Your club profile.',
                 }[modal] || 'Common'
           }
           close={close}
@@ -1009,35 +1095,72 @@ export default function Hub({
                 </div>
                 <div>
                   <Users size={20} />
+                  {event.kind === 'campus' ? (
+                    <span>
+                      <strong>{event.going_count || 0} going on Common</strong>
+                      Register on the event site to hold your spot
+                    </span>
+                  ) : (
+                    <span>
+                      <strong>
+                        {event.seats_left === 0
+                          ? 'Full · waitlist open'
+                          : `${event.seats_left ?? event.capacity} places available`}
+                      </strong>
+                      Capacity: {event.capacity}, including the host
+                    </span>
+                  )}
+                </div>
+                <button className="detail-organizer" onClick={() => openClub(event)}>
+                  <OrgAvatar name={event.organizer} logo={event.organizer_logo} />
                   <span>
                     <strong>
-                      {event.seats_left === 0
-                        ? 'Full · waitlist open'
-                        : `${event.seats_left ?? event.capacity} places available`}
+                      Hosted by {event.organizer}{' '}
+                      {event.organizer_verified && <VerifiedMark />}
                     </strong>
-                    Capacity: {event.capacity}, including the host
+                    {!live
+                      ? 'Sample host · preview only'
+                      : event.organizer_verified
+                        ? 'Verified Babson organisation · see profile'
+                        : event.kind === 'student'
+                          ? 'Verified Babson community member'
+                          : 'From a Babson campus listing · see profile'}
                   </span>
-                </div>
-                <div>
-                  <ShieldCheck size={20} />
-                  <span>
-                    <strong>Hosted by {event.organizer}</strong>
-                    {live ? 'Verified Babson community member' : 'Sample host · preview only'}
-                  </span>
-                </div>
+                </button>
               </div>
               <div className="detail-actions">
                 {event.status === 'cancelled' ? (
                   <p className="cancelled-note">This activity has been cancelled.</p>
-                ) : (event.register_url || event.source_url) && event.kind === 'campus' ? (
-                  <a
-                    className="button primary"
-                    href={event.register_url || event.source_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Register on event site <ArrowUpRight size={16} />
-                  </a>
+                ) : event.kind === 'campus' ? (
+                  <>
+                    <button
+                      className={`button ${event.attendance ? 'secondary saved' : 'secondary'}`}
+                      aria-pressed={Boolean(event.attendance)}
+                      disabled={pending}
+                      onClick={() =>
+                        doAction(
+                          event.attendance ? 'leave' : 'join',
+                          { id: event.id },
+                          event.attendance
+                            ? 'Removed from your plans.'
+                            : 'Marked as going. It’s in My plans — remember to register on the event site too.',
+                        )
+                      }
+                    >
+                      <Check size={16} />
+                      {event.attendance ? 'You’re going' : 'I’m going'}
+                    </button>
+                    {(event.register_url || event.source_url) && (
+                      <a
+                        className="button primary"
+                        href={event.register_url || event.source_url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Register on event site <ArrowUpRight size={16} />
+                      </a>
+                    )}
+                  </>
                 ) : event.host_id === profile.id ? (
                   <>
                     <button className="button primary" onClick={() => open('announce')}>
@@ -1080,6 +1203,64 @@ export default function Hub({
                   </button>
                 )}
               </div>
+              {event.kind === 'campus' && event.status === 'published' && (
+                <p className="fine-print">
+                  Marking yourself as going adds this to My plans and lets the organiser see you’re
+                  coming. It doesn’t register you on the event site.
+                </p>
+              )}
+              {live && managesEvent(event) && (
+                <section className="organiser-tools">
+                  <h3>Organiser tools</h3>
+                  <div className="detail-actions">
+                    {event.host_id !== profile.id && event.status === 'published' && (
+                      <button className="button secondary" onClick={() => open('announce')}>
+                        Post an update
+                      </button>
+                    )}
+                    <button
+                      className="button secondary"
+                      disabled={pending}
+                      onClick={() =>
+                        startTransition(async () => {
+                          try {
+                            setAttendees(await eventAttendees(event.id));
+                          } catch (e) {
+                            setFormError(e instanceof Error ? e.message : 'Could not load attendees.');
+                          }
+                        })
+                      }
+                    >
+                      <Users size={16} /> See who’s going
+                    </button>
+                  </div>
+                  {attendees && (
+                    <div className="attendee-list">
+                      <p>
+                        <strong>{attendees.filter((a) => a.status === 'joined').length} going</strong>
+                        {attendees.some((a) => a.status === 'waitlisted') &&
+                          ` · ${attendees.filter((a) => a.status === 'waitlisted').length} waitlisted`}
+                      </p>
+                      {attendees.length ? (
+                        <ul>
+                          {attendees.map((a, i) => (
+                            <li key={`${a.name}-${i}`}>
+                              <OrgAvatar name={a.name} />
+                              <span>{a.name}</span>
+                              <small>
+                                {a.status === 'waitlisted' ? 'Waitlist · ' : ''}
+                                {campusDate(a.joined_at)}
+                              </small>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="fine-print">No one yet. Share the event to get the word out.</p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              )}
               <h3>Before you come</h3>
               <p>{event.expectations}</p>
               <h3>If plans change</h3>
@@ -1177,6 +1358,7 @@ export default function Hub({
           {modal === 'create' && (
             <HostFlow
               pending={pending}
+              clubs={managedClubs}
               publish={(data) => {
                 switchMode('Plans', 'Hosting');
                 doAction(
@@ -1243,6 +1425,42 @@ export default function Hub({
               <button className="button primary" disabled={pending}>
                 Save preferences
               </button>
+              {live && (
+                <fieldset className="profile-clubs">
+                  <legend>Clubs & organisations</legend>
+                  {managedClubs.map((c) => (
+                    <div key={c.id} className="profile-club">
+                      <OrgAvatar name={c.name} logo={c.logo_path} />
+                      <span>
+                        <strong>{c.name}</strong> <VerifiedMark label={false} />
+                        <small>You manage this organisation</small>
+                      </span>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => {
+                          setClubView({ id: c.id, name: c.name });
+                          open('club-edit');
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  ))}
+                  {clubRequests
+                    .filter((r) => r.status !== 'approved')
+                    .slice(0, 3)
+                    .map((r) => (
+                      <p key={r.id} className="fine-print">
+                        {r.club_name}:{' '}
+                        {r.status === 'pending' ? 'waiting for verification' : 'not approved'}
+                      </p>
+                    ))}
+                  <button type="button" className="button secondary" onClick={() => open('club-request')}>
+                    <BadgeCheck size={16} /> Represent a club or organisation
+                  </button>
+                </fieldset>
+              )}
               <button
                 type="button"
                 className="text-button"
@@ -1441,6 +1659,54 @@ export default function Hub({
                 Confirm cancellation
               </button>
             </>
+          )}
+          {modal === 'club' && clubView && (
+            <ClubProfile
+              club={viewedClub}
+              name={clubView.name}
+              events={events.filter((e) =>
+                clubView.id ? e.organizer_id === clubView.id : e.organizer === clubView.name,
+              )}
+              canEdit={Boolean(viewedClub && managedClubs.some((c) => c.id === viewedClub.id))}
+              onShow={(e) => {
+                setModal(null);
+                showEvent(e);
+              }}
+              onFilter={() => {
+                setOrgFilter([clubView.name]);
+                setModal(null);
+                setSelected(null);
+                switchMode('Discover');
+                setWindow('This week');
+                setCategory('All plans');
+                setSearch('');
+                if (openedFromHub.current) {
+                  openedFromHub.current = false;
+                  globalThis.history.replaceState(null, '', live ? '/app' : '/preview');
+                }
+              }}
+              onEdit={() => open('club-edit')}
+            />
+          )}
+          {modal === 'club-request' && (
+            <ClubRequestForm
+              clubs={clubs.filter((c) => !managedClubs.some((m) => m.id === c.id))}
+              done={() => {
+                close();
+                setToast('Request sent. A moderator will verify it and you’ll get a notification.');
+                void refresh();
+              }}
+            />
+          )}
+          {modal === 'club-edit' && viewedClub && (
+            <ClubEditForm
+              club={viewedClub}
+              done={() => {
+                close();
+                setToast('Club profile saved.');
+                void refresh();
+              }}
+            />
           )}
           {modal === 'values' && (
             <div className="values-copy">

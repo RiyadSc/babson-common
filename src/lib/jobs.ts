@@ -2,7 +2,7 @@ import 'server-only';
 import { createClient } from '@supabase/supabase-js';
 import { timingSafeEqual } from 'node:crypto';
 import { publicEnv } from './env';
-import { parseFeed, ConnectorKind } from './ingestion';
+import { extractBelongClubs, parseFeed, ConnectorKind } from './ingestion';
 export function authorizedJob(request: Request) {
   const secret = process.env.CRON_SECRET;
   const provided = request.headers.get('authorization') || '';
@@ -132,5 +132,15 @@ export async function storeImport(
       else published++;
     }
   }
-  return { drafts: result.drafts.length, published, errors: result.errors };
+  const clubs = kind === 'html' ? extractBelongClubs(content) : [];
+  let linked = 0;
+  if (clubs.length) {
+    const { data, error: clubError } = await db.rpc('sync_belong_clubs', {
+      clubs,
+      source_ids: [sourceId],
+    });
+    if (clubError) result.errors.push(`Club linking: ${clubError.message}`);
+    else linked = Number(data) || 0;
+  }
+  return { drafts: result.drafts.length, published, linked, errors: result.errors };
 }

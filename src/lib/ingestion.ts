@@ -397,6 +397,29 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
     }];
   });
 }
+export type BelongClub = { club_id: number; name: string; acronym: string | null; uid: string };
+export function extractBelongClubs(content: string): BelongClub[] {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('{')) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return [];
+  }
+  const events = (parsed as { events?: unknown }).events;
+  if (!Array.isArray(events)) return [];
+  return events.flatMap((event) => {
+    if (!event || typeof event !== 'object') return [];
+    const row = event as Record<string, unknown>;
+    const clubId = Number(row.club_id);
+    const name = decodeHtml(String(row.groupName || ''));
+    const uid = String(row.eventUID || row.id || '');
+    if (!Number.isInteger(clubId) || clubId <= 0 || name.length < 2 || !uid) return [];
+    const acronym = typeof row.clubAcronym === 'string' ? decodeHtml(row.clubAcronym) : '';
+    return [{ club_id: clubId, name: name.slice(0, 100), acronym: acronym || null, uid }];
+  });
+}
 function summarizeAddress(address: unknown): string {
   if (typeof address === 'string') return address;
   if (!address || typeof address !== 'object') return '';

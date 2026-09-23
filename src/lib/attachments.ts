@@ -18,3 +18,22 @@ export async function prepareScreenshot(file: File) {
     .webp({ quality: 85 })
     .toBuffer();
 }
+export async function prepareLogo(file: File) {
+  if (
+    !['image/png', 'image/jpeg', 'image/webp'].includes(file.type) ||
+    file.size > 5 * 1024 * 1024 ||
+    file.size === 0
+  )
+    throw new Error('Choose a PNG, JPEG, or WebP logo under 5 MB.');
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const image = sharp(bytes, { limitInputPixels: 20_000_000 });
+  const metadata = await image.metadata();
+  if (!['png', 'jpeg', 'webp'].includes(metadata.format || ''))
+    throw new Error('Unsupported logo format');
+  return image
+    .rotate()
+    .resize({ width: 320, height: 320, fit: 'contain', background: '#ffffff' })
+    .flatten({ background: '#ffffff' })
+    .webp({ quality: 90 })
+    .toBuffer();
+}
