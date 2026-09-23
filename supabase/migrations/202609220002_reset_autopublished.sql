@@ -27,7 +27,9 @@ begin
   delete from public.event_tags where event_id = any(target_ids);
   delete from public.occurrences where event_id = any(target_ids);
 
-  -- Drop drafts that pointed at these events so the next ingest re-publishes cleanly.
+  -- Clear duplicate-of pointers on drafts that referenced these events (so those drafts
+  -- can be re-evaluated on the next ingest), then drop drafts that had them published.
+  update public.import_drafts set duplicate_of = null where duplicate_of = any(target_ids);
   delete from public.import_drafts where published_event_id = any(target_ids);
 
   delete from public.events where id = any(target_ids);
