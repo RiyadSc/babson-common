@@ -247,11 +247,17 @@ it('verifies club managers, links Belong clubs, and shows organisers who is goin
   );
   const feed = await asUser(
     ids[1],
-    `select organizer, organizer_is_club, organizer_verified, organizer_id from event_feed where id='${campus}'`,
+    `select organizer, organizer_is_club, organizer_verified, organizer_id, organizer_category from event_feed where id='${campus}'`,
   );
-  const row = feed.rows[0] as { organizer: string; organizer_verified: boolean; organizer_id: string };
+  const row = feed.rows[0] as {
+    organizer: string;
+    organizer_verified: boolean;
+    organizer_id: string;
+    organizer_category: string;
+  };
   expect(row.organizer).toBe('Babson Ultimate Frisbee');
   expect(row.organizer_verified).toBe(false);
+  expect(row.organizer_category).toBe('club');
 
   for (const id of [ids[1], ids[2], ids[3]])
     expect((await asUser(id, `select join_activity('${campus}') as s`)).rows[0]).toEqual({

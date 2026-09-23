@@ -9,15 +9,22 @@ import {
 describe('Belong club extraction', () => {
   it('maps each event to its stable club id, decoding names and skipping rows without a club', () => {
     const feed = JSON.stringify({
+      groups: [
+        { groupTypeName: 'Student Organization', clubType: [{ clubId: 73101 }] },
+        { groupTypeName: 'Department', clubType: [{ clubId: 73065 }] },
+        { groupTypeName: 'Fraternity and Sorority', clubType: [{ clubId: 57583 }] },
+      ],
       events: [
         { eventUID: 'u1', club_id: 73101, groupName: 'Babson Ultimate Frisbee', clubAcronym: 'BUF' },
         { eventUID: 'u2', club_id: '73065', groupName: 'Product, Building, &amp; Jammin' },
+        { eventUID: 'u4', club_id: 57583, groupName: 'Sigma Phi Epsilon', clubAcronym: 'SigEp' },
         { eventUID: 'u3', club_id: null, groupName: 'Nobody' },
       ],
     });
     expect(extractBelongClubs(feed)).toEqual([
-      { club_id: 73101, name: 'Babson Ultimate Frisbee', acronym: 'BUF', uid: 'u1' },
-      { club_id: 73065, name: 'Product, Building, & Jammin', acronym: null, uid: 'u2' },
+      { club_id: 73101, name: 'Babson Ultimate Frisbee', acronym: 'BUF', uid: 'u1', category: 'club' },
+      { club_id: 73065, name: 'Product, Building, & Jammin', acronym: null, uid: 'u2', category: 'office' },
+      { club_id: 57583, name: 'Sigma Phi Epsilon', acronym: 'SigEp', uid: 'u4', category: 'greek' },
     ]);
     expect(extractBelongClubs('<html></html>')).toEqual([]);
   });

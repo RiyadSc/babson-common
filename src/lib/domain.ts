@@ -20,6 +20,7 @@ export type CampusEvent = {
   organizer_is_club?: boolean | null;
   organizer_verified?: boolean | null;
   organizer_logo?: string | null;
+  organizer_category?: 'office' | 'greek' | 'club' | null;
   going_count?: number | null;
   host_id: string | null;
   location: string;

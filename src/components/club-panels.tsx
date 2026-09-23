@@ -57,14 +57,18 @@ export function OrgFilter({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const options = useMemo(() => {
-    const counts = new Map<string, { count: number; verified: boolean; logo: string | null }>();
+    const counts = new Map<
+      string,
+      { count: number; verified: boolean; logo: string | null; category: 'office' | 'greek' | 'club' }
+    >();
     for (const e of events) {
-      if (e.status !== 'published' || new Date(e.ends_at) < new Date()) continue;
+      if (e.status !== 'published' || new Date(e.ends_at) < new Date() || !e.organizer_is_club) continue;
       const prev = counts.get(e.organizer);
       counts.set(e.organizer, {
         count: (prev?.count || 0) + 1,
         verified: Boolean(prev?.verified || e.organizer_verified),
         logo: prev?.logo || e.organizer_logo || null,
+        category: prev?.category || e.organizer_category || 'club',
       });
     }
     return [...counts.entries()]
@@ -72,6 +76,15 @@ export function OrgFilter({
       .sort((a, b) => Number(b.verified) - Number(a.verified) || a.name.localeCompare(b.name));
   }, [events]);
   const visible = options.filter((o) => o.name.toLowerCase().includes(query.toLowerCase()));
+  const groups = (
+    [
+      ['office', 'University offices'],
+      ['greek', 'Greek life'],
+      ['club', 'Clubs'],
+    ] as const
+  )
+    .map(([id, label]) => ({ id, label, items: visible.filter((o) => o.category === id) }))
+    .filter((g) => g.items.length);
   const toggle = (name: string) =>
     onChange(selected.includes(name) ? selected.filter((n) => n !== name) : [...selected, name]);
   return (
@@ -110,20 +123,25 @@ export function OrgFilter({
             />
           </label>
           <div className="org-filter-list" role="group" aria-label="Organisations">
-            {visible.map((o) => (
-              <label key={o.name} className="org-option">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(o.name)}
-                  onChange={() => toggle(o.name)}
-                />
-                <OrgAvatar name={o.name} logo={o.logo} />
-                <span className="org-option-name">
-                  {o.name}
-                  {o.verified && <VerifiedMark label={false} />}
-                </span>
-                <small>{o.count}</small>
-              </label>
+            {groups.map((group) => (
+              <div key={group.id}>
+                <p className="org-group-label">{group.label}</p>
+                {group.items.map((o) => (
+                  <label key={o.name} className="org-option">
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(o.name)}
+                      onChange={() => toggle(o.name)}
+                    />
+                    <OrgAvatar name={o.name} logo={o.logo} />
+                    <span className="org-option-name">
+                      {o.name}
+                      {o.verified && <VerifiedMark label={false} />}
+                    </span>
+                    <small>{o.count}</small>
+                  </label>
+                ))}
+              </div>
             ))}
             {!visible.length && <p className="fine-print">No organisations match “{query}”.</p>}
           </div>

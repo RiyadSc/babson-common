@@ -2,6 +2,7 @@ import ICAL from 'ical.js';
 import { XMLParser } from 'fast-xml-parser';
 import { DateTime } from 'luxon';
 import { createHash } from 'node:crypto';
+export type OrgCategory = 'office' | 'greek' | 'club';
 export type Draft = {
   title: string;
   description: string;
@@ -13,6 +14,10 @@ export type Draft = {
   category: string | null;
   image: string | null;
   register_url: string | null;
+  organizer: string | null;
+  club_id: number | null;
+  acronym: string | null;
+  organizer_category: OrgCategory | null;
   confidence: number;
   fingerprint: string;
   content_hash: string;
@@ -104,6 +109,9 @@ export function normalizeInput(input: Record<string, unknown>, sourceUrl: string
       : classifyEvent(`${title} ${description}`);
   const image = normalizeUrl(input.image);
   const register_url = normalizeUrl(input.register_url);
+  const clubId = Number(input.club_id);
+  const organizerName = String(input.organizer || '').trim().slice(0, 100);
+  const categoryName = input.organizer_category;
   return {
     title,
     description,
@@ -115,6 +123,13 @@ export function normalizeInput(input: Record<string, unknown>, sourceUrl: string
     category,
     image,
     register_url,
+    organizer: organizerName.length >= 2 ? organizerName : null,
+    club_id: Number.isInteger(clubId) && clubId > 0 ? clubId : null,
+    acronym: String(input.acronym || '').trim().slice(0, 20) || null,
+    organizer_category:
+      categoryName === 'office' || categoryName === 'greek' || categoryName === 'club'
+        ? categoryName
+        : null,
     confidence: ends_at && location ? 0.95 : 0.5,
     fingerprint: fingerprint({ title, starts_at }),
     content_hash: createHash('sha256')
@@ -340,6 +355,36 @@ function extractBabsonCards(html: string, sourceUrl: string): Record<string, unk
   }
   return results;
 }
+export type BelongClub = {
+  club_id: number;
+  name: string;
+  acronym: string | null;
+  uid: string;
+  category: OrgCategory;
+};
+function orgCategory(groupTypeName: string): OrgCategory {
+  const type = groupTypeName.toLowerCase();
+  if (type.includes('frat') || type.includes('soror') || type.includes('greek')) return 'greek';
+  if (type.includes('department') || type.includes('office') || type.includes('administrative'))
+    return 'office';
+  return 'club';
+}
+function categoryByClub(parsed: { groups?: unknown }) {
+  const map = new Map<number, OrgCategory>();
+  const groups = Array.isArray(parsed.groups) ? parsed.groups : [];
+  for (const group of groups) {
+    if (!group || typeof group !== 'object') continue;
+    const row = group as { groupTypeName?: unknown; clubType?: unknown };
+    const category = orgCategory(String(row.groupTypeName || ''));
+    const clubs = Array.isArray(row.clubType) ? row.clubType : [];
+    for (const club of clubs) {
+      if (!club || typeof club !== 'object') continue;
+      const id = Number((club as { clubId?: unknown }).clubId);
+      if (Number.isInteger(id) && id > 0) map.set(id, category);
+    }
+  }
+  return map;
+}
 function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<string, unknown>[] {
   const trimmed = content.trim();
   if (!trimmed.startsWith('{')) return [];
@@ -349,7 +394,9 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
   } catch {
     return [];
   }
-  const events = (parsed as { events?: unknown }).events;
+  const record = parsed as { events?: unknown; groups?: unknown };
+  const events = record.events;
+  const categories = categoryByClub(record);
   if (!Array.isArray(events)) return [];
   return events.flatMap((event) => {
     if (!event || typeof event !== 'object') return [];
@@ -371,7 +418,9 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
     if (starts_at && ends_at && !endLabel) {
       ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
     }
-    const location = String(row.event_location || row.event_address || row.groupName || 'Babson College');
+    const clubId = Number(row.club_id);
+    const organizer = decodeHtml(String(row.groupName || ''));
+    const location = String(row.event_location || row.event_address || organizer || 'Babson College');
     const redirect = typeof row.eventRedirectUrl === 'string' ? row.eventRedirectUrl.trim() : '';
     const rsvp =
       redirect ||
@@ -394,10 +443,15 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
       external_id: String(row.eventUID || row.id || `${sourceUrl}#${title}`),
       register_url: rsvp || null,
       image: flyerUrl || null,
+      organizer: organizer.length >= 2 ? organizer.slice(0, 100) : null,
+      club_id: Number.isInteger(clubId) && clubId > 0 ? clubId : null,
+      acronym:
+        typeof row.clubAcronym === 'string' ? decodeHtml(row.clubAcronym).slice(0, 20) || null : null,
+      organizer_category:
+        Number.isInteger(clubId) && clubId > 0 ? categories.get(clubId) || 'club' : null,
     }];
   });
 }
-export type BelongClub = { club_id: number; name: string; acronym: string | null; uid: string };
 export function extractBelongClubs(content: string): BelongClub[] {
   const trimmed = content.trim();
   if (!trimmed.startsWith('{')) return [];
@@ -407,7 +461,9 @@ export function extractBelongClubs(content: string): BelongClub[] {
   } catch {
     return [];
   }
-  const events = (parsed as { events?: unknown }).events;
+  const record = parsed as { events?: unknown; groups?: unknown };
+  const events = record.events;
+  const categories = categoryByClub(record);
   if (!Array.isArray(events)) return [];
   return events.flatMap((event) => {
     if (!event || typeof event !== 'object') return [];
@@ -417,7 +473,13 @@ export function extractBelongClubs(content: string): BelongClub[] {
     const uid = String(row.eventUID || row.id || '');
     if (!Number.isInteger(clubId) || clubId <= 0 || name.length < 2 || !uid) return [];
     const acronym = typeof row.clubAcronym === 'string' ? decodeHtml(row.clubAcronym) : '';
-    return [{ club_id: clubId, name: name.slice(0, 100), acronym: acronym || null, uid }];
+    return [{
+      club_id: clubId,
+      name: name.slice(0, 100),
+      acronym: acronym || null,
+      uid,
+      category: categories.get(clubId) || 'club',
+    }];
   });
 }
 function summarizeAddress(address: unknown): string {

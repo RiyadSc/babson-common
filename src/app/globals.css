@@ -3194,9 +3194,16 @@ button:hover {
   font-size: 13px;
 }
 .org-filter-list {
-  max-height: 300px;
+  max-height: 360px;
   overflow: auto;
   margin-top: 8px;
+}
+.org-group-label {
+  margin: 12px 4px 2px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 .org-option {
   display: flex;
