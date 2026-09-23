@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { DateTime } from 'luxon';
 import { CalendarDays, ChevronLeft, ChevronRight, Sparkles } from 'lucide-react';
 import { CATEGORIES, CampusEvent, TIMEZONE } from '@/lib/domain';
@@ -31,7 +31,12 @@ export default function CalendarView({ events, onShow }: Props) {
   const [cursor, setCursor] = useState(() => today.startOf('month'));
   const [selected, setSelected] = useState<string>(isoDay(today));
   const [filter, setFilter] = useState<string>('All plans');
+  const agendaRef = useRef<HTMLDivElement | null>(null);
 
+  // Group events per day and dedupe visible duplicates (same title, same start minute)
+  // so the calendar cell doesn't render three identical rows of "Ultimate Frisbee Practice".
+  // The underlying DB rows still exist — they'll all appear expanded in the agenda if the
+  // user opens the day. See docs/INGESTION.md for cross-source de-dup rules.
   const byDay = useMemo(() => {
     const map = new Map<string, CampusEvent[]>();
     for (const e of events) {
@@ -44,10 +49,25 @@ export default function CalendarView({ events, onShow }: Props) {
     for (const list of map.values()) list.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
     return map;
   }, [events, filter]);
+  const dedupeVisual = (list: CampusEvent[]) => {
+    const seen = new Set<string>();
+    const out: CampusEvent[] = [];
+    for (const e of list) {
+      const key = `${e.title.trim().toLowerCase()}|${e.starts_at.slice(0, 16)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(e);
+    }
+    return out;
+  };
+  const selectDay = (key: string) => {
+    setSelected(key);
+    requestAnimationFrame(() => {
+      agendaRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   const monthStart = cursor.startOf('month');
-  const monthEnd = cursor.endOf('month');
-  const gridStart = monthStart.startOf('week').minus({ days: (monthStart.weekday % 7) === 0 ? 0 : 0 });
   // Luxon weekdays: 1=Mon..7=Sun. We want a Sun-start grid.
   const firstOffset = monthStart.weekday % 7; // Sun=0, Mon=1, ...
   const gridDays: DateTime[] = [];
@@ -55,7 +75,7 @@ export default function CalendarView({ events, onShow }: Props) {
   for (let i = 0; i < 42; i++) gridDays.push(start.plus({ days: i }));
 
   const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const selectedList = byDay.get(selected) || [];
+  const selectedList = dedupeVisual(byDay.get(selected) || []);
   const selectedDt = DateTime.fromISO(selected, { zone: TIMEZONE });
 
   return (
@@ -117,7 +137,8 @@ export default function CalendarView({ events, onShow }: Props) {
         {gridDays.map((day) => {
           const key = isoDay(day);
           const inMonth = day.month === cursor.month;
-          const list = byDay.get(key) || [];
+          const rawList = byDay.get(key) || [];
+          const list = dedupeVisual(rawList);
           const isToday = key === isoDay(today);
           const isSelected = key === selected;
           return (
@@ -126,7 +147,7 @@ export default function CalendarView({ events, onShow }: Props) {
               type="button"
               role="gridcell"
               aria-selected={isSelected}
-              onClick={() => setSelected(key)}
+              onClick={() => selectDay(key)}
               className={[
                 'calendar-day',
                 inMonth ? '' : 'is-outside',
@@ -161,14 +182,25 @@ export default function CalendarView({ events, onShow }: Props) {
                     <span className="calendar-pill-title">{e.title}</span>
                   </span>
                 ))}
-                {list.length > 3 && <span className="calendar-more">+{list.length - 3} more</span>}
+                {list.length > 3 && (
+                  <span
+                    className="calendar-more"
+                    role="button"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      selectDay(key);
+                    }}
+                  >
+                    +{list.length - 3} more · view all
+                  </span>
+                )}
               </span>
             </button>
           );
         })}
       </div>
 
-      <div className="calendar-agenda" aria-live="polite">
+      <div className="calendar-agenda" aria-live="polite" ref={agendaRef}>
         <div className="section-heading">
           <div>
             <h2>{selectedDt.toFormat('cccc, LLLL d')}</h2>
