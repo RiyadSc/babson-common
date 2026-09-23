@@ -128,6 +128,7 @@ export default function CalendarView({ events, onShow }: Props) {
         ))}
       </div>
 
+      <div className="calendar-layout">
       <div className="calendar-grid" role="grid">
         {weekdays.map((w) => (
           <div key={w} className="calendar-weekday" role="columnheader">
@@ -232,6 +233,7 @@ export default function CalendarView({ events, onShow }: Props) {
             </li>
           ))}
         </ul>
+      </div>
       </div>
     </section>
   );
