@@ -52,7 +52,8 @@ import EventArtwork from './event-artwork';
 import CalendarView from './calendar-view';
 type Notice = { id: string; message: string; kind: string; created_at: string };
 type Initial = { events: CampusEvent[]; profile: Profile; notifications: Notice[] } | null;
-type Mode = 'Discover' | 'Calendar' | 'Plans' | 'Moderation';
+type Mode = 'Discover' | 'Plans' | 'Moderation';
+type DiscoverView = 'grid' | 'calendar';
 type PlanTab = 'Going' | 'Saved' | 'Hosting';
 const previewProfile: Profile = {
   id: 'preview-student',
@@ -88,6 +89,7 @@ export default function Hub({
   const [profile, setProfile] = useState<Profile>(initial?.profile || previewProfile);
   const [notices, setNotices] = useState<Notice[]>(initial?.notifications || []);
   const [mode, setMode] = useState<Mode>('Discover');
+  const [discoverView, setDiscoverView] = useState<DiscoverView>('grid');
   const [planTab, setPlanTab] = useState<PlanTab>('Going');
   const [window, setWindow] = useState('This week');
   const [category, setCategory] = useState('All plans');
@@ -341,7 +343,6 @@ export default function Hub({
   };
   const navigation = [
     { name: 'Discover' as Mode, icon: Compass },
-    { name: 'Calendar' as Mode, icon: CalendarDays },
     { name: 'Plans' as Mode, icon: ListChecks },
   ];
   const formSubmit = (e: React.FormEvent<HTMLFormElement>, action: string, message: string) => {
@@ -479,11 +480,34 @@ export default function Hub({
                     <h1>This week, within reach.</h1>
                     <p>Plans you can actually join, from people around campus.</p>
                   </div>
-                  <button className="button primary" onClick={() => open('create')}>
-                    <Plus size={18} />
-                    Host a hangout
-                  </button>
+                  <div className="discover-intro-actions">
+                    <div className="view-toggle" role="tablist" aria-label="Discover view">
+                      <button
+                        role="tab"
+                        aria-selected={discoverView === 'grid'}
+                        className={discoverView === 'grid' ? 'active' : ''}
+                        onClick={() => setDiscoverView('grid')}
+                      >
+                        <ListChecks size={15} /> Grid
+                      </button>
+                      <button
+                        role="tab"
+                        aria-selected={discoverView === 'calendar'}
+                        className={discoverView === 'calendar' ? 'active' : ''}
+                        onClick={() => setDiscoverView('calendar')}
+                      >
+                        <CalendarDays size={15} /> Calendar
+                      </button>
+                    </div>
+                    <button className="button primary" onClick={() => open('create')}>
+                      <Plus size={18} />
+                      Host a hangout
+                    </button>
+                  </div>
                 </section>
+                {discoverView === 'calendar' ? (
+                  <CalendarView events={events} onShow={showEvent} />
+                ) : (
                 <section className="discovery-section" aria-label="Discover plans">
                   <div className="section-heading">
                     <div>
@@ -585,11 +609,10 @@ export default function Hub({
                     </span>
                   </div>
                 </section>
+                )}
               </>
             ) : mode === 'Moderation' ? (
               <Moderation />
-            ) : mode === 'Calendar' ? (
-              <CalendarView events={events} onShow={showEvent} />
             ) : (
               <>
                 <section className="discover-intro plans-intro">
@@ -622,7 +645,7 @@ export default function Hub({
                 </div>
               </>
             )}
-            {mode !== 'Moderation' && mode !== 'Calendar' && (
+            {mode !== 'Moderation' && !(mode === 'Discover' && discoverView === 'calendar') && (
               <div className="content-columns">
                 <div>
                   {mode !== 'Discover' && <h2 className="sr-only">Your plans</h2>}

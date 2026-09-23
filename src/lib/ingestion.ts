@@ -372,7 +372,11 @@ function extractCampusGroupsEvents(content: string, sourceUrl: string): Record<s
       ends_at = DateTime.fromISO(starts_at, { setZone: true }).plus({ hours: 2 }).toISO();
     }
     const location = String(row.event_location || row.event_address || row.groupName || 'Babson College');
-    const rsvp = typeof row.rsvpLinkCalendar === 'string' ? row.rsvpLinkCalendar : '';
+    const redirect = typeof row.eventRedirectUrl === 'string' ? row.eventRedirectUrl.trim() : '';
+    const rsvp =
+      redirect ||
+      (typeof row.eventUrl === 'string' && row.eventUrl.trim()) ||
+      (typeof row.rsvpLinkCalendar === 'string' ? row.rsvpLinkCalendar : '');
     const flyer = typeof row.eventFlyer === 'string' && row.eventFlyer ? row.eventFlyer : '';
     const flyerUrl = flyer
       ? flyer.startsWith('//')
