@@ -49,9 +49,10 @@ import Modal from './modal';
 import Moderation from './moderation';
 import HostFlow from './host-flow';
 import EventArtwork from './event-artwork';
+import CalendarView from './calendar-view';
 type Notice = { id: string; message: string; kind: string; created_at: string };
 type Initial = { events: CampusEvent[]; profile: Profile; notifications: Notice[] } | null;
-type Mode = 'Discover' | 'Plans' | 'Moderation';
+type Mode = 'Discover' | 'Calendar' | 'Plans' | 'Moderation';
 type PlanTab = 'Going' | 'Saved' | 'Hosting';
 const previewProfile: Profile = {
   id: 'preview-student',
@@ -340,6 +341,7 @@ export default function Hub({
   };
   const navigation = [
     { name: 'Discover' as Mode, icon: Compass },
+    { name: 'Calendar' as Mode, icon: CalendarDays },
     { name: 'Plans' as Mode, icon: ListChecks },
   ];
   const formSubmit = (e: React.FormEvent<HTMLFormElement>, action: string, message: string) => {
@@ -586,6 +588,8 @@ export default function Hub({
               </>
             ) : mode === 'Moderation' ? (
               <Moderation />
+            ) : mode === 'Calendar' ? (
+              <CalendarView events={events} onShow={showEvent} />
             ) : (
               <>
                 <section className="discover-intro plans-intro">
@@ -618,7 +622,7 @@ export default function Hub({
                 </div>
               </>
             )}
-            {mode !== 'Moderation' && (
+            {mode !== 'Moderation' && mode !== 'Calendar' && (
               <div className="content-columns">
                 <div>
                   {mode !== 'Discover' && <h2 className="sr-only">Your plans</h2>}
