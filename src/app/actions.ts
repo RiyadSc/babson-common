@@ -192,15 +192,13 @@ export async function mutate(action: string, input: unknown) {
         if (upload.error) throw new Error(upload.error.message);
         data.screenshot_path = path;
       }
-      result = await client.from('import_drafts').insert({
-        submitted_by: user.id,
-        fingerprint: draft.fingerprint,
-        content_hash: draft.content_hash,
-        payload: draft,
-        raw: data,
-        confidence: draft.confidence,
-        status: 'review',
-      });
+      const suggestion = {
+        ...draft,
+        organizer_id: typeof data.organizer_id === 'string' ? data.organizer_id : '',
+        screenshot_path: data.screenshot_path || null,
+        raw: { ...data, screenshot: undefined },
+      };
+      result = await client.rpc('submit_suggestion', { payload: suggestion });
     } else if (action === 'save') {
       const id = z.uuid().parse(data.id);
       result = data.saved
@@ -259,7 +257,7 @@ export async function loadModeration() {
   if (!role) throw new Error('Moderator required');
   const results = await Promise.all([
     client.from('reports').select('*').eq('status', 'open'),
-    client.from('import_drafts').select('*').eq('status', 'review'),
+    client.from('import_drafts').select('*').eq('status', 'review').order('created_at', { ascending: false }),
     client.from('sources').select('*'),
     client.from('audit_log').select('*').order('created_at', { ascending: false }).limit(50),
     client.rpc('pilot_metrics'),
@@ -274,7 +272,10 @@ export async function loadModeration() {
   for (const r of results) if (r.error) throw new Error(r.error.message);
   return {
     reports: results[0].data,
-    drafts: results[1].data,
+    suggestions: (results[1].data || []).filter(
+      (d) => d.submitted_by && !d.source_id,
+    ),
+    drafts: (results[1].data || []).filter((d) => d.source_id),
     sources: results[2].data,
     audit: results[3].data,
     metrics: results[4].data,

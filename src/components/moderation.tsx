@@ -174,6 +174,88 @@ export default function Moderation() {
             ))}
           </section>
           <section className="moderation-card">
+            <h2>Student suggestions</h2>
+            <p>Listings from students who are not verified club managers. Your own posts and verified club posts publish without landing here.</p>
+            {!data.suggestions?.length && <p>No student suggestions waiting.</p>}
+            {data.suggestions?.map((d) => {
+              const shot = (d.raw as { screenshot_path?: string } | null)?.screenshot_path;
+              return (
+              <div className="moderation-row" key={d.id}>
+                <h3>{d.payload.title || 'New submission'}</h3>
+                <p>{d.payload.description}</p>
+                <p>
+                  {d.payload.location}
+                  {d.payload.starts_at ? ` · ${new Date(d.payload.starts_at).toLocaleString()}` : ''}
+                </p>
+                {d.payload.source_url && (
+                  <a href={d.payload.source_url} target="_blank" rel="noreferrer">
+                    Open original source ↗
+                  </a>
+                )}
+                {shot && (
+                  <button
+                    className="text-button"
+                    onClick={() =>
+                      run(async () => {
+                        setImageUrl(await screenshotUrl(shot));
+                      })
+                    }
+                  >
+                    View private screenshot
+                  </button>
+                )}
+                {editing === d.id ? (
+                  <>
+                    <label>
+                      Verified event fields (JSON)
+                      <textarea value={edit} onChange={(e) => setEdit(e.target.value)} />
+                    </label>
+                    <button
+                      disabled={pending}
+                      className="button primary"
+                      onClick={() => run(() => reviewDraft(d.id, 'publish', JSON.parse(edit)))}
+                    >
+                      Publish verified event
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="button secondary"
+                    onClick={() => {
+                      setEditing(d.id);
+                      setEdit(
+                        JSON.stringify(
+                          {
+                            ...d.payload,
+                            category: d.payload.category || 'Social',
+                            capacity: 30,
+                            cost: 0,
+                            expectations:
+                              'Everyone is welcome. Check the source for accessibility details.',
+                            cancellation_policy:
+                              'Check source and in-app updates before traveling.',
+                          },
+                          null,
+                          2,
+                        ),
+                      );
+                    }}
+                  >
+                    Review & complete
+                  </button>
+                )}
+                <button
+                  disabled={pending}
+                  className="text-button"
+                  onClick={() => run(() => reviewDraft(d.id, 'reject', {}))}
+                >
+                  Reject
+                </button>
+              </div>
+              );
+            })}
+          </section>
+          <section className="moderation-card">
             <h2>Import review</h2>
             <p>
               Check the original source, dates, venue, cost, and expectations before publishing.
@@ -191,7 +273,7 @@ export default function Moderation() {
                     Open original source ↗
                   </a>
                 )}
-                {d.raw.screenshot_path && (
+                {d.raw?.screenshot_path && (
                   <button
                     className="text-button"
                     onClick={() =>

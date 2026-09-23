@@ -375,3 +375,70 @@ it('does not deliver stale reminders after cancellation', async () => {
   expect(stale.length).toBeGreaterThan(0);
   expect(claimed.rows.filter((n) => stale.includes(n.notification_id))).toHaveLength(0);
 });
+it('publishes moderator and verified club suggestions and queues other students', async () => {
+  await db.query("update profiles set role='moderator' where id=$1", [ids[3]]);
+  await db.query("update profiles set role='student' where id<>$1", [ids[3]]);
+  const suggestion = (extra: Record<string, string>) =>
+    `$s$${JSON.stringify({
+      title: 'Open campus mixer',
+      description: 'An open invitation with enough detail to stand on its own.',
+      location: 'Trim dining hall',
+      starts_at: '2099-06-01T18:00:00.000Z',
+      ends_at: '2099-06-01T20:00:00.000Z',
+      source_url: 'https://www.babson.edu/mixer',
+      confidence: 0.9,
+      ...extra,
+    })}$s$::jsonb`;
+  const queued = await asUser(
+    ids[1],
+    `select submit_suggestion(${suggestion({ fingerprint: 'fp-student', content_hash: 'ch-student', title: 'Student mixer' })}) as result`,
+  );
+  const queuedResult = (queued.rows[0] as { result: { published: boolean; draft_id: string } })
+    .result;
+  expect(queuedResult.published).toBe(false);
+  await expect(
+    asUser(ids[1], `select publish_suggestion_draft('${queuedResult.draft_id}')`),
+  ).rejects.toThrow();
+  const published = await asUser(
+    ids[3],
+    `select submit_suggestion(${suggestion({ fingerprint: 'fp-mod', content_hash: 'ch-mod', title: 'Moderator mixer' })}) as result`,
+  );
+  const publishedResult = (published.rows[0] as { result: { published: boolean; event_id: string } })
+    .result;
+  expect(publishedResult.published).toBe(true);
+  expect(
+    (await asUser(ids[1], `select title, kind from event_feed where id='${publishedResult.event_id}'`))
+      .rows[0],
+  ).toMatchObject({ title: 'Moderator mixer', kind: 'campus' });
+  const club = (
+    await db.query<{ id: string }>(
+      "insert into organizers(name, kind, owner_id, verified_at, category) values ('Babson Consulting Association','club',$1,now(),'club') returning id",
+      [ids[2]],
+    )
+  ).rows[0].id;
+  await expect(
+    asUser(
+      ids[1],
+      `select submit_suggestion(${suggestion({ fingerprint: 'fp-steal', content_hash: 'ch-steal', title: 'Stolen mixer', organizer_id: club })})`,
+    ),
+  ).rejects.toThrow();
+  const clubPost = await asUser(
+    ids[2],
+    `select submit_suggestion(${suggestion({ fingerprint: 'fp-club', content_hash: 'ch-club', title: 'Consulting mixer', organizer_id: club })}) as result`,
+  );
+  const clubResult = (clubPost.rows[0] as { result: { published: boolean; event_id: string } })
+    .result;
+  expect(clubResult.published).toBe(true);
+  expect(
+    (
+      await asUser(
+        ids[1],
+        `select organizer, organizer_is_club, organizer_verified from event_feed where id='${clubResult.event_id}'`,
+      )
+    ).rows[0],
+  ).toEqual({
+    organizer: 'Babson Consulting Association',
+    organizer_is_club: true,
+    organizer_verified: true,
+  });
+});

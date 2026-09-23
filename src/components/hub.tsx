@@ -192,6 +192,7 @@ export default function Hub({
     setClubRequests(data.clubRequests);
   };
   const managedClubs = clubs.filter((c) => c.owner_id === profile.id && c.verified_at);
+  const publishesNow = profile.role === 'moderator' || managedClubs.length > 0;
   const managesEvent = (e: CampusEvent) =>
     e.host_id === profile.id || managedClubs.some((c) => c.id === e.organizer_id);
   const byOrg = (e: CampusEvent) => orgFilter.length === 0 || orgFilter.includes(e.organizer);
@@ -210,6 +211,7 @@ export default function Hub({
     setModal(name);
   };
   const switchMode = (next: Mode, tab?: PlanTab) => {
+    if (next === 'Moderation' && profile.role !== 'moderator') return;
     setMode(next);
     if (tab) setPlanTab(tab);
     requestAnimationFrame(() => globalThis.scrollTo({ top: 0, behavior: 'auto' }));
@@ -662,9 +664,9 @@ export default function Hub({
                 </section>
                 )}
               </>
-            ) : mode === 'Moderation' ? (
+            ) : mode === 'Moderation' && profile.role === 'moderator' ? (
               <Moderation />
-            ) : (
+            ) : mode === 'Moderation' ? null : (
               <>
                 <section className="discover-intro plans-intro">
                   <div>
@@ -997,6 +999,15 @@ export default function Hub({
           <Plus size={22} />
           Create
         </button>
+        {profile.role === 'moderator' && (
+          <button
+            className={mode === 'Moderation' ? 'active' : ''}
+            onClick={() => switchMode('Moderation')}
+          >
+            <ShieldCheck size={21} />
+            Review
+          </button>
+        )}
       </nav>
       {toast && (
         <div role="status" className="toast">
@@ -1350,7 +1361,11 @@ export default function Hub({
                   <CalendarPlus size={22} />
                 </span>
                 <strong>Suggest a campus event</strong>
-                <small>Send a listing for moderator review.</small>
+                <small>
+                  {publishesNow
+                    ? 'Publish a campus listing.'
+                    : 'Send a listing for moderator review.'}
+                </small>
                 <ArrowRight size={18} />
               </button>
             </div>
@@ -1507,15 +1522,37 @@ export default function Hub({
                   e,
                   'submit',
                   live
-                    ? 'Sent for review. A curator will verify it before it appears.'
+                    ? publishesNow
+                      ? 'Published. It’s on Discover now.'
+                      : 'Sent for review. A curator will verify it before it appears.'
                     : 'Sample suggestion saved in your preview updates.',
                 )
               }
             >
               <p>
-                Spotted a plan in an email, on a poster, or on a public page? Share the details. A
-                curator checks each submission.
+                {publishesNow
+                  ? profile.role === 'moderator'
+                    ? 'You’re the reviewer, so this publishes immediately.'
+                    : 'Verified club managers publish without waiting for review.'
+                  : 'Spotted a plan in an email, on a poster, or on a public page? Share the details. A curator checks each submission.'}
               </p>
+              {managedClubs.length > 0 && (
+                <label>
+                  Post as
+                  <select
+                    name="organizer_id"
+                    defaultValue={profile.role === 'moderator' ? '' : managedClubs[0].id}
+                    required={profile.role !== 'moderator'}
+                  >
+                    {profile.role === 'moderator' && <option value="">Community listing</option>}
+                    {managedClubs.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label>
                 Screenshot (optional)
                 <input type="file" name="screenshot" accept="image/png,image/jpeg,image/webp" />
@@ -1554,7 +1591,7 @@ export default function Hub({
                 other students’ personal information.
               </p>
               <button className="button primary" disabled={pending}>
-                Send for review <ArrowRight size={17} />
+                {publishesNow ? 'Publish event' : 'Send for review'} <ArrowRight size={17} />
               </button>
             </form>
           )}
