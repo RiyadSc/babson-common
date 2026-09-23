@@ -25,6 +25,10 @@ function fmtMonth(dt: DateTime) {
 function isoDay(dt: DateTime) {
   return dt.toFormat('yyyy-LL-dd');
 }
+function shortTime(iso: string) {
+  const dt = DateTime.fromISO(iso).setZone(TIMEZONE);
+  return (dt.minute ? dt.toFormat('h:mma') : dt.toFormat('ha')).toLowerCase().replace('m', '');
+}
 
 export default function CalendarView({ events, onShow }: Props) {
   const today = useMemo(() => DateTime.now().setZone(TIMEZONE).startOf('day'), []);
@@ -177,9 +181,7 @@ export default function CalendarView({ events, onShow }: Props) {
                       className={`category-dot cat-${CATEGORY_INDEX[e.category] || 1}`}
                       aria-hidden="true"
                     />
-                    <span className="calendar-pill-time">
-                      {DateTime.fromISO(e.starts_at).setZone(TIMEZONE).toFormat('h:mma').toLowerCase()}
-                    </span>
+                    <span className="calendar-pill-time">{shortTime(e.starts_at)}</span>
                     <span className="calendar-pill-title">{e.title}</span>
                   </span>
                 ))}
