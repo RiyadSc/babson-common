@@ -31,7 +31,10 @@ export async function loadHub() {
     client.from('saves').select('event_id').eq('user_id', user.id),
     client.from('notifications').select('*').order('created_at', { ascending: false }).limit(50),
   ]);
-  for (const r of results) if (r.error) throw new Error(r.error.message);
+  const labels = ['event_feed', 'profiles', 'attendance', 'saves', 'notifications'];
+  results.forEach((r, i) => {
+    if (r.error) throw new Error(`${labels[i]}: ${r.error.message}`);
+  });
   const [events, profile, attendance, saves, notifications] = results;
   return {
     events: events.data!.map((e) => ({
