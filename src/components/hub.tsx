@@ -31,6 +31,7 @@ import {
   CalendarPlus,
   ListChecks,
   BadgeCheck,
+  LoaderCircle,
 } from 'lucide-react';
 import {
   activitySchema,
@@ -122,6 +123,7 @@ export default function Hub({
   const [toast, setToast] = useState('');
   const [formError, setFormError] = useState('');
   const [pending, startTransition] = useTransition();
+  const [busyLabel, setBusyLabel] = useState('');
   const [ready, setReady] = useState(false);
   const [announcements, setAnnouncements] = useState<{ id: string; body: string }[]>([]);
   const [clubs, setClubs] = useState<Club[]>(initial?.clubs || []);
@@ -273,6 +275,13 @@ export default function Hub({
     closeAfter = false,
   ) =>
     startTransition(async () => {
+      const labels: Record<string, string> = {
+        submit: 'Uploading poster and publishing event…', create: 'Publishing your hangout…',
+        join: 'Adding this to your plans…', leave: 'Updating your plans…', save: 'Saving your change…',
+        profile: 'Saving your preferences…', report: 'Sending your report…', cancel: 'Cancelling event…',
+        announce: 'Posting update…', block: 'Updating your safety settings…', check_in: 'Recording attendance…', no_show: 'Recording attendance…',
+      };
+      setBusyLabel(labels[action] || 'Updating…');
       setFormError('');
       try {
         if (live) {
@@ -349,6 +358,8 @@ export default function Hub({
         if (closeAfter) close();
       } catch (e) {
         setFormError(e instanceof Error ? e.message : 'Please try again.');
+      } finally {
+        setBusyLabel('');
       }
     });
   const shown = rankEvents(
@@ -411,6 +422,12 @@ export default function Hub({
     return <AuthScreen mode="login" available={live} callbackError={Boolean(initialError)} />;
   return (
     <div className="app-shell" aria-busy={!ready}>
+      {pending && busyLabel && (
+        <div className="global-progress" role="status" aria-live="polite">
+          <LoaderCircle className="loading-spinner" size={19} />
+          <span>{busyLabel}</span>
+        </div>
+      )}
       <a className="skip-link" href="#main">
         Skip to content
       </a>
@@ -1554,11 +1571,11 @@ export default function Hub({
                 </label>
               )}
               <label>
-                Screenshot (optional)
-                <input type="file" name="screenshot" accept="image/png,image/jpeg,image/webp" />
+                Event poster (optional)
+                <input type="file" name="poster" accept="image/png,image/jpeg,image/webp" />
               </label>
               <p className="field-hint">
-                PNG, JPEG, or WebP up to 5 MB. Visible only to you and moderators.
+                PNG, JPEG, or WebP up to 5 MB. This becomes the event artwork when published.
               </p>
               <label>
                 Source link
@@ -1591,7 +1608,11 @@ export default function Hub({
                 other students’ personal information.
               </p>
               <button className="button primary" disabled={pending}>
-                {publishesNow ? 'Publish event' : 'Send for review'} <ArrowRight size={17} />
+                {pending ? (
+                  <><LoaderCircle className="loading-spinner" size={17} /> {publishesNow ? 'Uploading & publishing…' : 'Uploading & sending…'}</>
+                ) : (
+                  <>{publishesNow ? 'Publish event' : 'Send for review'} <ArrowRight size={17} /></>
+                )}
               </button>
             </form>
           )}

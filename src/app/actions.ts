@@ -9,7 +9,7 @@ import {
 } from '@/lib/domain';
 import { serverClient, studentClient } from '@/lib/supabase/server';
 import { appUrl } from '@/lib/env';
-import { prepareLogo, prepareScreenshot } from '@/lib/attachments';
+import { prepareLogo, preparePoster } from '@/lib/attachments';
 import { normalizeInput } from '@/lib/ingestion';
 export async function signIn(email: string, mode: 'login' | 'signup' = 'login', returnTo = '/app') {
   if (!isBabsonEmail(email)) return { error: 'Use your @babson.edu email address.' };
@@ -181,24 +181,30 @@ export async function mutate(action: string, input: unknown) {
       result = await client.from('profiles').update(p).eq('id', user.id);
     } else if (action === 'submit') {
       const draft = normalizeInput(data, String(data.source_url));
-      const screenshot = data.screenshot;
-      delete data.screenshot;
-      if (screenshot instanceof File && screenshot.size) {
-        const bytes = await prepareScreenshot(screenshot);
+      const poster = data.poster;
+      delete data.poster;
+      if (poster instanceof File && poster.size) {
+        const bytes = await preparePoster(poster);
         const path = `${user.id}/${crypto.randomUUID()}.webp`;
         const upload = await client.storage
-          .from('event-submissions')
+          .from('event-posters')
           .upload(path, bytes, { contentType: 'image/webp', upsert: false });
         if (upload.error) throw new Error(upload.error.message);
-        data.screenshot_path = path;
+        const { data: publicPoster } = client.storage.from('event-posters').getPublicUrl(path);
+        data.poster_path = path;
+        data.image = publicPoster.publicUrl;
       }
       const suggestion = {
         ...draft,
         organizer_id: typeof data.organizer_id === 'string' ? data.organizer_id : '',
-        screenshot_path: data.screenshot_path || null,
-        raw: { ...data, screenshot: undefined },
+        poster_path: data.poster_path || null,
+        image: typeof data.image === 'string' ? data.image : draft.image,
+        raw: { ...data, poster: undefined },
       };
       result = await client.rpc('submit_suggestion', { payload: suggestion });
+      if (result.error && data.poster_path) {
+        await client.storage.from('event-posters').remove([String(data.poster_path)]);
+      }
     } else if (action === 'save') {
       const id = z.uuid().parse(data.id);
       result = data.saved
@@ -268,6 +274,11 @@ export async function loadModeration() {
       .eq('kind', 'club')
       .not('verified_at', 'is', null)
       .order('name'),
+    client
+      .from('event_feed')
+      .select('id,title,status,category,organizer,organizer_id,source_name,starts_at,location,kind,image')
+      .order('starts_at', { ascending: false })
+      .limit(1000),
   ]);
   for (const r of results) if (r.error) throw new Error(r.error.message);
   return {
@@ -297,6 +308,7 @@ export async function loadModeration() {
       verified_at: string;
       profiles: { name: string } | null;
     }[],
+    events: results[7].data || [],
   };
 }
 export async function reviewClubRequest(id: string, decision: 'approve' | 'reject', note: string) {
@@ -319,6 +331,32 @@ export async function moderate(id: string, resolution: string, note: string) {
     eid: z.uuid().parse(id),
     resolution,
     note,
+  });
+  if (error) throw new Error(error.message);
+}
+export async function deleteEvent(id: string, note: string) {
+  const { client } = await studentClient();
+  const reason = z.string().trim().min(10, 'Give a deletion reason of at least 10 characters').max(500).parse(note);
+  const { data, error } = await client.rpc('delete_event', {
+    eid: z.uuid().parse(id),
+    note: reason,
+  });
+  if (error) throw new Error(error.message);
+  const deleted = data as { id: string; title: string; image: string | null };
+  const marker = '/storage/v1/object/public/event-posters/';
+  if (deleted.image?.includes(marker)) {
+    const path = decodeURIComponent(deleted.image.split(marker)[1].split('?')[0]);
+    await client.storage.from('event-posters').remove([path]);
+  }
+  return deleted;
+}
+export async function setSourceEnabled(id: string, enabled: boolean, note: string) {
+  const { client } = await studentClient();
+  const reason = z.string().trim().min(10, 'Give a reason of at least 10 characters').max(500).parse(note);
+  const { error } = await client.rpc('set_source_enabled', {
+    source_id: z.uuid().parse(id),
+    should_enable: z.boolean().parse(enabled),
+    note: reason,
   });
   if (error) throw new Error(error.message);
 }

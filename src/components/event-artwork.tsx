@@ -1,4 +1,5 @@
-import type { CSSProperties } from 'react';
+/* eslint-disable @next/next/no-img-element -- Organizer posters can be external or Supabase-hosted. */
+import { useState, type CSSProperties } from 'react';
 import type { CampusEvent } from '@/lib/domain';
 
 function activity(event: CampusEvent) {
@@ -47,6 +48,31 @@ function Illustration({ topic }: { topic: string }) {
 }
 
 export default function EventArtwork({ event }: { event: CampusEvent }) {
+  const [failedPoster, setFailedPoster] = useState(false);
+  const [posterLoaded, setPosterLoaded] = useState(false);
+  const poster =
+    event.image &&
+    !/\/events\/[^/]+\/graphic\.svg(?:\?|$)|\/images\/[^/]+\.svg(?:\?|$)|network-effect-hero/i.test(
+      event.image,
+    )
+      ? event.image
+      : null;
+  if (poster && !failedPoster) {
+    return (
+      <>
+        {!posterLoaded && <div className="poster-loading" aria-label="Loading event poster" />}
+        <img
+          className={`event-poster-image ${posterLoaded ? 'loaded' : ''}`}
+          src={poster}
+          alt={`${event.title} poster`}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setPosterLoaded(true)}
+          onError={() => setFailedPoster(true)}
+        />
+      </>
+    );
+  }
   const topic = activity(event);
   const [paper, ink, accent] = palettes[topic];
   return <div className="activity-artwork" aria-hidden="true" data-activity-art={topic}

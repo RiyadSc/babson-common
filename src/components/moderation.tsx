@@ -1,14 +1,17 @@
 'use client';
 import { useEffect, useState, useTransition } from 'react';
 import {
+  deleteEvent,
   loadModeration,
   moderate,
   reviewClubRequest,
   reviewDraft,
   revokeClub,
   screenshotUrl,
+  setSourceEnabled,
 } from '@/app/actions';
 import { OrgAvatar } from './club-panels';
+import { LoaderCircle } from 'lucide-react';
 export default function Moderation() {
   const [data, setData] = useState<Awaited<ReturnType<typeof loadModeration>> | null>(null);
   const [error, setError] = useState('');
@@ -17,6 +20,10 @@ export default function Moderation() {
   const [edit, setEdit] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [eventSearch, setEventSearch] = useState('');
+  const [eventStatus, setEventStatus] = useState('all');
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string } | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
   const refresh = () =>
     loadModeration()
       .then(setData)
@@ -37,6 +44,11 @@ export default function Moderation() {
     });
   return (
     <section className="moderation-grid">
+      {pending && (
+        <div className="section-progress" role="status" aria-live="polite">
+          <LoaderCircle className="loading-spinner" size={18} /> Applying moderation change…
+        </div>
+      )}
       {imageUrl && (
         <a href={imageUrl} target="_blank" rel="noreferrer">
           Open screenshot (link expires in one minute) ↗
@@ -55,7 +67,10 @@ export default function Moderation() {
         </p>
       )}
       {!data ? (
-        <p>Loading moderation queue…</p>
+        <div className="loading-panel" role="status">
+          <LoaderCircle className="loading-spinner" size={22} />
+          <span>Loading moderation queue…</span>
+        </div>
       ) : (
         <>
           <div className="metrics">
@@ -66,6 +81,109 @@ export default function Moderation() {
               </div>
             ))}
           </div>
+          <section className="moderation-card admin-events">
+            <div className="moderation-heading">
+              <div>
+                <div className="eyebrow">ALL LISTINGS</div>
+                <h2>Event control</h2>
+                <p>Search every event, including hidden and cancelled listings.</p>
+              </div>
+              <span>{data.events.length} total</span>
+            </div>
+            <div className="admin-filters">
+              <label>
+                Search events
+                <input
+                  type="search"
+                  placeholder="Title, host, source, or location"
+                  value={eventSearch}
+                  onChange={(e) => setEventSearch(e.target.value)}
+                />
+              </label>
+              <label>
+                Status
+                <select value={eventStatus} onChange={(e) => setEventStatus(e.target.value)}>
+                  <option value="all">All statuses</option>
+                  <option value="published">Published</option>
+                  <option value="hidden">Hidden</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </label>
+            </div>
+            <div className="admin-event-list">
+              {data.events
+                .filter((item) => eventStatus === 'all' || item.status === eventStatus)
+                .filter((item) => {
+                  const query = eventSearch.trim().toLowerCase();
+                  return !query || [item.title, item.organizer, item.source_name, item.location]
+                    .some((value) => String(value || '').toLowerCase().includes(query));
+                })
+                .map((item) => (
+                  <article className="admin-event-row" key={item.id}>
+                    <div>
+                      <div className="admin-event-meta">
+                        <span className={`status-badge status-${item.status}`}>{item.status}</span>
+                        <span>{new Date(item.starts_at).toLocaleString()}</span>
+                        <span>{item.category}</span>
+                      </div>
+                      <h3>{item.title}</h3>
+                      <p>{item.organizer} · {item.location}</p>
+                      <small>{item.source_name}</small>
+                    </div>
+                    <div className="admin-event-actions">
+                      <a className="text-button" href={`/events/${item.id}`} target="_blank" rel="noreferrer">View ↗</a>
+                      {item.status !== 'published' && (
+                        <button disabled={pending} className="button secondary" onClick={() => run(() => moderate(item.id, 'published', 'Restored after moderator review.'))}>Restore</button>
+                      )}
+                      {item.status !== 'hidden' && (
+                        <button disabled={pending} className="button secondary" onClick={() => run(() => moderate(item.id, 'hidden', 'Hidden by administrator for review.'))}>Hide</button>
+                      )}
+                      {item.status !== 'cancelled' && (
+                        <button disabled={pending} className="button secondary" onClick={() => run(() => moderate(item.id, 'cancelled', 'Cancelled by administrator after review.'))}>Cancel</button>
+                      )}
+                      <button
+                        disabled={pending}
+                        className="button danger"
+                        onClick={() => {
+                          setDeleteTarget({ id: item.id, title: item.title });
+                          setDeleteConfirmation('');
+                        }}
+                      >Delete</button>
+                    </div>
+                  </article>
+                ))}
+            </div>
+            {deleteTarget && (
+              <div className="danger-zone" role="alertdialog" aria-modal="true" aria-labelledby="delete-event-title">
+                <h3 id="delete-event-title">Permanently delete “{deleteTarget.title}”?</h3>
+                <p>This removes the listing, RSVPs, reports, announcements, and poster. A deletion audit record remains.</p>
+                <label>
+                  Reason for audit log
+                  <textarea
+                    rows={3}
+                    value={notes[`delete-${deleteTarget.id}`] || ''}
+                    onChange={(e) => setNotes((current) => ({ ...current, [`delete-${deleteTarget.id}`]: e.target.value }))}
+                    placeholder="Explain why this event must be permanently removed"
+                  />
+                </label>
+                <label>
+                  Type the event title to confirm
+                  <input value={deleteConfirmation} onChange={(e) => setDeleteConfirmation(e.target.value)} />
+                </label>
+                <div>
+                  <button className="button secondary" onClick={() => setDeleteTarget(null)}>Keep event</button>
+                  <button
+                    className="button danger"
+                    disabled={pending || deleteConfirmation !== deleteTarget.title || (notes[`delete-${deleteTarget.id}`] || '').trim().length < 10}
+                    onClick={() => run(async () => {
+                      await deleteEvent(deleteTarget.id, notes[`delete-${deleteTarget.id}`]);
+                      setDeleteTarget(null);
+                    })}
+                  >Delete permanently</button>
+                </div>
+              </div>
+            )}
+          </section>
           <section className="moderation-card">
             <h2>Club verification</h2>
             <p>
@@ -353,6 +471,7 @@ export default function Moderation() {
           </section>
           <section className="moderation-card">
             <h2>Source health</h2>
+            <p>Pause a broken or untrusted feed immediately. Pausing also disables auto-publishing.</p>
             {data.sources?.map((s) => (
               <div className="moderation-row" key={s.id}>
                 <h3>{s.name}</h3>
@@ -360,6 +479,20 @@ export default function Moderation() {
                   {s.enabled ? 'Enabled' : 'Paused'} · Last checked: {s.last_checked_at || 'Never'}
                 </p>
                 <p>{s.last_error || 'No recorded errors'}</p>
+                <label>
+                  Reason for source change
+                  <input
+                    aria-label={`Source change reason ${s.id}`}
+                    value={notes[`source-${s.id}`] || ''}
+                    onChange={(e) => setNotes((current) => ({ ...current, [`source-${s.id}`]: e.target.value }))}
+                    placeholder={s.enabled ? 'Why are you pausing this source?' : 'Why is it safe to resume?'}
+                  />
+                </label>
+                <button
+                  className={s.enabled ? 'button danger' : 'button secondary'}
+                  disabled={pending || (notes[`source-${s.id}`] || '').trim().length < 10}
+                  onClick={() => run(() => setSourceEnabled(s.id, !s.enabled, notes[`source-${s.id}`]))}
+                >{s.enabled ? 'Pause source' : 'Resume source'}</button>
               </div>
             ))}
           </section>

@@ -68,3 +68,16 @@ Cross-source matching candidates are held as duplicates and linked to the existi
 - [Babson campus events](https://www.babson.edu/about/events/)
 
 These references were verified as Babson event sources on September 9, 2026. The seed does not pretend an HTML page is an ICS/JSON feed. Arrange access to approved feeds with source owners before enabling automation.
+
+### Import retry repair (2026-09-25)
+
+Deploy the importer together with `202609250001_import_idempotency.sql`. Unchanged
+imports now keep their existing review/publication state; unpublished review drafts
+can still retry publication after a transient failure. The publisher serializes
+publication and checks existing publication links independently of draft status.
+
+The migration hides abandoned duplicates only when the auto-publish audit trail
+links them to the same draft as a current published event with an identical source,
+title, location, and schedule. It keeps copies with attendance, saves, reports,
+announcements, notifications, or analytics for manual review. No events or user data
+are deleted; each hidden copy receives a `hide_import_duplicate` audit entry.

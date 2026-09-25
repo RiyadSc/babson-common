@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Clock, MapPin, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Clock, LoaderCircle, MapPin, Sparkles } from 'lucide-react';
 import { CATEGORIES, Club, TIMEZONE } from '@/lib/domain';
 import { DateTime } from 'luxon';
 
@@ -265,7 +265,11 @@ export default function HostFlow({
           </button>
         )}
         <button className="button primary" disabled={pending}>
-          {step === 3 ? 'Publish hangout' : 'Continue'} <ArrowRight size={17} />
+          {pending ? (
+            <><LoaderCircle className="loading-spinner" size={17} /> Publishing…</>
+          ) : (
+            <>{step === 3 ? 'Publish hangout' : 'Continue'} <ArrowRight size={17} /></>
+          )}
         </button>
       </div>
     </form>

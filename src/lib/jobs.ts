@@ -87,12 +87,13 @@ export async function storeImport(
   const autoPublish = Boolean(sourceRow?.auto_publish);
   let published = 0;
   for (const draft of result.drafts) {
-    const { data: existing } = await db
+    const { data: existing, error: matchError } = await db
       .from('import_drafts')
       .select('id,published_event_id,source_id,external_id')
       .eq('fingerprint', draft.fingerprint)
       .not('published_event_id', 'is', null)
       .limit(1);
+    if (matchError) throw matchError;
     const match = existing?.[0];
     const isRevision =
       match?.source_id === sourceId &&
@@ -113,23 +114,33 @@ export async function storeImport(
           status: duplicate ? 'duplicate' : 'review',
           duplicate_of: duplicate || null,
         },
-        { onConflict: 'source_id,fingerprint,content_hash', ignoreDuplicates: false },
+        // An unchanged import must preserve publication links and review decisions.
+        { onConflict: 'source_id,fingerprint,content_hash', ignoreDuplicates: true },
       )
       .select('id,status')
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    // A prior attempt may have stored the draft but failed before publication.
+    let candidate = upserted;
+    if (!candidate) {
+      const retry = await db.from('import_drafts').select('id,status')
+        .eq('source_id', sourceId).eq('fingerprint', draft.fingerprint)
+        .eq('content_hash', draft.content_hash).maybeSingle();
+      if (retry.error) throw retry.error;
+      candidate = retry.data;
+    }
     if (
       autoPublish &&
-      upserted?.status === 'review' &&
+      candidate?.status === 'review' &&
       draft.external_id &&
       draft.confidence >= 0.9 &&
       new Date(draft.starts_at).getTime() > Date.now()
     ) {
-      const { error: publishError } = await db.rpc('auto_publish_draft', {
-        draft_id: upserted.id,
+      const { data: eventId, error: publishError } = await db.rpc('auto_publish_draft', {
+        draft_id: candidate.id,
       });
       if (publishError) result.errors.push(`Auto-publish: ${publishError.message}`);
-      else published++;
+      else if (eventId) published++;
     }
   }
   const clubs = kind === 'html' ? extractBelongClubs(content) : [];

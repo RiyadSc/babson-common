@@ -184,6 +184,30 @@ it('protects job execution and analytics from ordinary students', async () => {
   await expect(asUser(ids[1], 'select claim_deliveries()')).rejects.toThrow();
   await expect(asUser(ids[1], 'select pilot_metrics()')).rejects.toThrow();
 });
+it('restricts admin controls and permanently deletes events with an audit record', async () => {
+  const input = {
+    title: 'Event needing removal', description: 'A listing created to test the moderator control plane.',
+    category: 'Social', location: 'Reynolds center', starts_at: '2099-08-01T18:00:00Z',
+    ends_at: '2099-08-01T19:00:00Z', capacity: 20, cost: 0,
+    expectations: 'Everyone is welcome', cancellation_policy: 'Cancel if plans change',
+  };
+  const created = await asUser(ids[0], `select create_activity('${JSON.stringify(input)}') as id`);
+  const id = (created.rows[0] as { id: string }).id;
+  await asUser(ids[1], `select join_activity('${id}')`);
+  await expect(asUser(ids[1], `select delete_event('${id}', 'This listing must be removed')`)).rejects.toThrow(/Moderator required/);
+  await db.query("update profiles set role='moderator' where id=$1", [ids[3]]);
+  await asUser(ids[3], `select delete_event('${id}', 'Duplicate listing posted by mistake')`);
+  expect((await db.query('select id from events where id=$1', [id])).rows).toHaveLength(0);
+  expect((await db.query("select details from audit_log where action='delete_event' and details->>'event_id'=$1", [id])).rows).toHaveLength(1);
+  expect((await db.query("select message from notifications where user_id=$1 and kind='moderation'", [ids[1]])).rows).toHaveLength(1);
+});
+it('lets only moderators pause import sources with a recorded reason', async () => {
+  const source = (await db.query<{ id: string }>("insert into sources(name,url,kind,enabled,auto_publish) values ('Admin source','https://babson.edu/admin-feed','html',true,true) returning id")).rows[0].id;
+  await expect(asUser(ids[1], `select set_source_enabled('${source}', false, 'Feed is returning invalid data')`)).rejects.toThrow(/Moderator required/);
+  await db.query("update profiles set role='moderator' where id=$1", [ids[3]]);
+  await asUser(ids[3], `select set_source_enabled('${source}', false, 'Feed is returning invalid data')`);
+  expect((await db.query('select enabled,auto_publish from sources where id=$1', [source])).rows[0]).toEqual({ enabled: false, auto_publish: false });
+});
 it('blocks visibility and removes existing attendance in both directions', async () => {
   const input = {
     title: 'A second open hangout',
@@ -410,6 +434,15 @@ it('publishes moderator and verified club suggestions and queues other students'
     (await asUser(ids[1], `select title, kind from event_feed where id='${publishedResult.event_id}'`))
       .rows[0],
   ).toMatchObject({ title: 'Moderator mixer', kind: 'campus' });
+  const posterUrl = `https://example.supabase.co/storage/v1/object/public/event-posters/${ids[3]}/31000000-0000-0000-0000-000000000099.webp`;
+  const posterPost = await asUser(
+    ids[3],
+    `select submit_suggestion(${suggestion({ fingerprint: 'fp-poster', content_hash: 'ch-poster', title: 'Poster event', image: posterUrl })}) as result`,
+  );
+  const posterResult = (posterPost.rows[0] as { result: { event_id: string } }).result;
+  expect((await db.query('select image from events where id=$1', [posterResult.event_id])).rows[0]).toEqual({
+    image: posterUrl,
+  });
   const club = (
     await db.query<{ id: string }>(
       "insert into organizers(name, kind, owner_id, verified_at, category) values ('Babson Consulting Association','club',$1,now(),'club') returning id",
@@ -441,4 +474,85 @@ it('publishes moderator and verified club suggestions and queues other students'
     organizer_is_club: true,
     organizer_verified: true,
   });
+});
+it('seeds Babson social and professional fraternities as Greek organisations', async () => {
+  const rows = await db.query<{ name: string }>(
+    "select name from organizers where category='greek' order by name",
+  );
+  expect(rows.rows.map((row) => row.name)).toEqual(
+    expect.arrayContaining([
+      'Alpha Kappa Psi',
+      'Delta Sigma Pi Fraternity',
+      'Delta Tau Delta',
+      'Eta Omega Chi',
+      'Phi Delta Theta',
+      'Phi Gamma Nu',
+      'Sigma Phi Epsilon',
+      'Theta Chi',
+    ]),
+  );
+});
+
+it('keeps auto-publication idempotent after retries, revisions, and cross-source matches', async () => {
+  const source = (await db.query<{ id: string }>(
+    "insert into sources(name,url,kind,enabled,auto_publish) values ('Retry source','https://babson.edu/retry','web',true,true) returning id",
+  )).rows[0].id;
+  const payload = {
+    title: 'Import retry regression', description: 'An event that must only be published once.',
+    location: 'Campus center', starts_at: '2099-10-01T18:00:00Z', ends_at: '2099-10-01T20:00:00Z',
+    source_url: 'https://babson.edu/retry',
+  };
+  const draft = async (external: string, fingerprint: string, hash: string) => (await db.query<{ id: string }>(
+    'insert into import_drafts(source_id,external_id,fingerprint,content_hash,payload,raw,confidence) values ($1,$2,$3,$4,$5,$5,.95) returning id',
+    [source, external, fingerprint, hash, payload],
+  )).rows[0].id;
+  const publish = async (id: string) => (await db.query<{ id: string | null }>(
+    'select auto_publish_draft($1) as id', [id],
+  )).rows[0].id;
+  const original = await draft('retry-1', 'retry-fp', 'original');
+  const eventId = await publish(original);
+  expect(eventId).toBeTruthy();
+  expect(await publish(original)).toBe(eventId);
+  // Reproduce the old importer resetting the published row on every refresh.
+  await db.query("update import_drafts set status='review' where id=$1", [original]);
+  expect(await publish(original)).toBe(eventId);
+  expect((await db.query('select status from import_drafts where id=$1', [original])).rows[0]).toEqual({ status: 'published' });
+  // A changed date/content is a revision for manual review, even if the old status was reset.
+  await db.query("update import_drafts set status='review' where id=$1", [original]);
+  const revision = await draft('retry-1', 'moved-fp', 'revision');
+  expect(await publish(revision)).toBeNull();
+  const duplicate = await draft('different-external-id', 'retry-fp', 'duplicate');
+  expect(await publish(duplicate)).toBeNull();
+  expect((await db.query('select status,duplicate_of from import_drafts where id=$1', [duplicate])).rows[0])
+    .toEqual({ status: 'duplicate', duplicate_of: eventId });
+  expect((await db.query('select id from events where source_id=$1', [source])).rows).toHaveLength(1);
+});
+
+it('retires proven import replay copies while preserving saved events and the canonical listing', async () => {
+  const original = (await db.query<{ id: string; published_event_id: string }>(
+    "select id,published_event_id from import_drafts where fingerprint='retry-fp' and published_event_id is not null",
+  )).rows[0];
+  const clone = async () => {
+    const id = (await db.query<{ id: string }>(
+      `insert into events(title,description,category,organizer_id,source_id,provenance_url,location,kind,cost,expectations,cancellation_policy)
+       select title,description,category,organizer_id,source_id,provenance_url,location,kind,cost,expectations,cancellation_policy
+       from events where id=$1 returning id`, [original.published_event_id],
+    )).rows[0].id;
+    await db.query(`insert into occurrences(event_id,starts_at,ends_at,capacity)
+      select $1,starts_at,ends_at,capacity from occurrences where event_id=$2`, [id, original.published_event_id]);
+    await db.query("insert into audit_log(event_id,action,details) values ($1,'auto_publish',$2)",
+      [id, { draft_id: original.id }]);
+    return id;
+  };
+  const abandoned = await clone();
+  const saved = await clone();
+  await db.query('insert into saves(event_id,user_id) values ($1,$2)', [saved, ids[0]]);
+  const migration = readFileSync('supabase/migrations/202609250001_import_idempotency.sql', 'utf8');
+  await db.exec(migration);
+  await db.exec(migration);
+  expect((await db.query('select status from events where id=$1', [abandoned])).rows[0]).toEqual({ status: 'hidden' });
+  for (const id of [saved, original.published_event_id]) {
+    expect((await db.query('select status from events where id=$1', [id])).rows[0]).toEqual({ status: 'published' });
+  }
+  expect((await db.query("select id from audit_log where event_id=$1 and action='hide_import_duplicate'", [abandoned])).rows).toHaveLength(1);
 });
