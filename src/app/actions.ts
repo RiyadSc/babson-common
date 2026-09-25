@@ -2,8 +2,6 @@
 import { z } from 'zod';
 import {
   activitySchema,
-  Club,
-  ClubRequest,
   clubProfileSchema,
   isBabsonEmail,
 } from '@/lib/domain';
@@ -11,6 +9,7 @@ import { serverClient, studentClient } from '@/lib/supabase/server';
 import { appUrl } from '@/lib/env';
 import { prepareLogo, preparePoster } from '@/lib/attachments';
 import { normalizeInput } from '@/lib/ingestion';
+import { loadHubData } from '@/lib/hub-data';
 export async function signIn(email: string, mode: 'login' | 'signup' = 'login', returnTo = '/app') {
   if (!isBabsonEmail(email)) return { error: 'Use your @babson.edu email address.' };
   const destination = returnTo.startsWith('/') && !returnTo.startsWith('//') ? returnTo : '/app';
@@ -29,50 +28,7 @@ export async function signOut() {
   await c.auth.signOut();
 }
 export async function loadHub() {
-  const { client, user } = await studentClient();
-  const results = await Promise.all([
-    client.from('event_feed').select('*').order('starts_at').limit(500),
-    client.from('profiles').select('*').eq('id', user.id).single(),
-    client.from('attendance').select('event_id,status').eq('user_id', user.id),
-    client.from('saves').select('event_id').eq('user_id', user.id),
-    client.from('notifications').select('*').order('created_at', { ascending: false }).limit(50),
-    client
-      .from('organizers')
-      .select('id,name,acronym,bio,logo_path,instagram,website,verified_at,owner_id')
-      .eq('kind', 'club')
-      .order('name')
-      .limit(1000),
-    client
-      .from('club_requests')
-      .select('id,club_name,status,created_at')
-      .eq('requester_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(10),
-  ]);
-  const labels = [
-    'event_feed',
-    'profiles',
-    'attendance',
-    'saves',
-    'notifications',
-    'organizers',
-    'club_requests',
-  ];
-  results.forEach((r, i) => {
-    if (r.error) throw new Error(`${labels[i]}: ${r.error.message}`);
-  });
-  const [events, profile, attendance, saves, notifications, clubs, clubRequests] = results;
-  return {
-    events: events.data!.map((e) => ({
-      ...e,
-      attendance: attendance.data!.find((a) => a.event_id === e.id)?.status,
-      saved: saves.data!.some((s) => s.event_id === e.id),
-    })),
-    profile: profile.data!,
-    notifications: notifications.data!,
-    clubs: clubs.data! as Club[],
-    clubRequests: clubRequests.data! as ClubRequest[],
-  };
+  return loadHubData(await studentClient());
 }
 async function uploadLogo(
   client: Awaited<ReturnType<typeof studentClient>>['client'],
